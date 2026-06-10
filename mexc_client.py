@@ -1,133 +1,245 @@
-"""
-mexc_client.py — Public MEXC Perpetual Futures API wrapper (no auth required).
-Handles candles, order-book depth, and last-price fetch.
-"""
+"""MEXC Futures client — paper and live modes."""
 
-import httpx
-import asyncio
-import logging
+import hashlib
+import hmac
+import os
+import time
 from typing import Optional
 
-log = logging.getLogger("mexc_client")
+import httpx
 
-MEXC_BASE = "https://contract.mexc.com"
+from config import PAPER_MODE
 
-# MEXC interval strings for kline endpoint
-INTERVAL_15M = "Min15"
-INTERVAL_1H  = "Min60"
+MEXC_API_BASE = "https://contract.mexc.com"
 
 
 class MexcClient:
     def __init__(self):
-        self._http: Optional[httpx.AsyncClient] = None
+        self._http       = httpx.AsyncClient(timeout=10.0)
+        self._paper_mode = PAPER_MODE
+        self._api_key    = os.getenv("MEXC_API_KEY",    "")
+        self._secret_key = os.getenv("MEXC_SECRET_KEY", "")
 
-    @property
-    def http(self) -> httpx.AsyncClient:
-        if self._http is None or self._http.is_closed:
-            self._http = httpx.AsyncClient(
-                base_url=MEXC_BASE,
-                timeout=10.0,
-                headers={"Content-Type": "application/json"},
+    def _sign(self, params: dict) -> str:
+        query = "&".join(f"{k}={v}" for k, v in sorted(params.items()))
+        return hmac.new(
+            self._secret_key.encode(),
+            query.encode(),
+            hashlib.sha256,
+        ).hexdigest()
+
+    async def get_price(self, symbol: str) -> Optional[float]:
+        try:
+            resp = await self._http.get(
+                f"{MEXC_API_BASE}/api/v1/contract/ticker",
+                params={"symbol": f"{symbol}_USDT"},
             )
-        return self._http
+            resp.raise_for_status()
+            data = resp.json()
+            px = data.get("data", {}).get("lastPrice")
+            return float(px) if px else None
+        except Exception as e:
+            print(f"[MexcClient] get_price({symbol}) error: {e}")
+            return None
+
+    async def open_position(
+        self,
+        symbol: str,
+        direction: str,
+        margin_usdc: float,
+        leverage: int,
+        entry_price: Optional[float] = None,
+        order_type: str = "MARKET",
+        limit_px: Optional[float] = None,
+        sl_price: Optional[float] = None,
+    ) -> dict:
+        if self._paper_mode:
+            price = entry_price or limit_px or await self.get_price(symbol) or 0.0
+            size  = (margin_usdc * leverage) / price if price > 0 else 0.0
+            if order_type == "LIMIT" and limit_px:
+                return {
+                    "status":    "pending",
+                    "paper":     True,
+                    "exchange":  "MEXC",
+                    "order_id":  f"paper-{int(time.time())}",
+                    "symbol":    symbol,
+                    "direction": direction,
+                    "limit_px":  limit_px,
+                    "size":      size,
+                    "margin":    margin_usdc,
+                    "leverage":  leverage,
+                    "timestamp": int(time.time()),
+                }
+            return {
+                "status":      "ok",
+                "paper":       True,
+                "exchange":    "MEXC",
+                "symbol":      symbol,
+                "direction":   direction,
+                "entry_price": price,
+                "size":        size,
+                "margin":      margin_usdc,
+                "leverage":    leverage,
+                "timestamp":   int(time.time()),
+            }
+
+        try:
+            if not self._api_key or not self._secret_key:
+                return {"status": "error", "msg": "MEXC_API_KEY / MEXC_SECRET_KEY not configured"}
+
+            price = entry_price or await self.get_price(symbol) or 0.0
+            if not price:
+                return {"status": "error", "msg": "Failed to fetch MEXC price"}
+
+            exec_px   = limit_px if (order_type == "LIMIT" and limit_px) else price
+            size      = round((margin_usdc * leverage) / exec_px, 6)
+            side      = 1 if direction.upper() == "LONG" else 3
+            mexc_type = 1 if (order_type == "LIMIT" and limit_px) else 5
+
+            ts   = str(int(time.time() * 1000))
+            body = {
+                "symbol":   f"{symbol}_USDT",
+                "side":     side,
+                "openType": 1,
+                "type":     mexc_type,
+                "vol":      size,
+                "leverage": leverage,
+            }
+            if mexc_type == 1:
+                body["price"] = exec_px
+            if sl_price:
+                body["stopLossPrice"] = sl_price
+
+            sig_params    = {**body, "timestamp": ts, "api_key": self._api_key}
+            body["sign"]  = self._sign(sig_params)
+
+            resp = await self._http.post(
+                f"{MEXC_API_BASE}/api/v1/private/order/submit",
+                json=body,
+                headers={
+                    "ApiKey":       self._api_key,
+                    "Request-Time": ts,
+                    "Content-Type": "application/json",
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+            if data.get("success"):
+                order_id  = str(data.get("data", ""))
+                base_resp = {
+                    "status":    "ok",
+                    "paper":     False,
+                    "exchange":  "MEXC",
+                    "symbol":    symbol,
+                    "direction": direction,
+                    "size":      size,
+                    "margin":    margin_usdc,
+                    "leverage":  leverage,
+                    "timestamp": int(time.time()),
+                    "order_id":  order_id,
+                    "raw":       data,
+                }
+                if order_type == "LIMIT" and limit_px:
+                    return {**base_resp, "status": "pending", "limit_px": exec_px}
+                return {**base_resp, "entry_price": exec_px}
+            return {"status": "error", "msg": data.get("message", "MEXC order rejected")}
+
+        except Exception as e:
+            return {"status": "error", "msg": str(e)}
+
+    async def cancel_order(self, symbol: str, order_id: str) -> dict:
+        if self._paper_mode:
+            print(f"[MexcClient] cancel_order paper: {symbol} {order_id}")
+            return {"status": "ok", "paper": True}
+        try:
+            if not self._api_key or not self._secret_key:
+                return {"status": "error", "msg": "MEXC credentials not configured"}
+
+            ts     = str(int(time.time() * 1000))
+            params = {
+                "symbol":    f"{symbol}_USDT",
+                "orderId":   order_id,
+                "timestamp": ts,
+                "api_key":   self._api_key,
+            }
+            params["sign"] = self._sign(params)
+
+            resp = await self._http.delete(
+                f"{MEXC_API_BASE}/api/v1/private/order/cancel",
+                params=params,
+                headers={
+                    "ApiKey":       self._api_key,
+                    "Request-Time": ts,
+                    "Content-Type": "application/json",
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            if data.get("success"):
+                return {"status": "ok", "raw": data}
+            return {"status": "error", "msg": data.get("message", "MEXC cancel rejected")}
+        except Exception as e:
+            print(f"[MexcClient] cancel_order({symbol}, {order_id}) error: {e}")
+            return {"status": "error", "msg": str(e)}
+
+    async def close_position(self, symbol: str, direction: str, size: float) -> dict:
+        if self._paper_mode:
+            price = await self.get_price(symbol) or 0.0
+            return {
+                "status":      "ok",
+                "paper":       True,
+                "exchange":    "MEXC",
+                "symbol":      symbol,
+                "close_price": price,
+                "timestamp":   int(time.time()),
+            }
+
+        try:
+            if not self._api_key or not self._secret_key:
+                return {"status": "error", "msg": "MEXC credentials not configured"}
+
+            price = await self.get_price(symbol) or 0.0
+            side  = 4 if direction.upper() == "LONG" else 2
+
+            ts   = str(int(time.time() * 1000))
+            body = {
+                "symbol":   f"{symbol}_USDT",
+                "side":     side,
+                "openType": 1,
+                "type":     5,
+                "vol":      abs(size),
+                "leverage": 1,
+            }
+            sig_params   = {**body, "timestamp": ts, "api_key": self._api_key}
+            body["sign"] = self._sign(sig_params)
+
+            resp = await self._http.post(
+                f"{MEXC_API_BASE}/api/v1/private/order/submit",
+                json=body,
+                headers={
+                    "ApiKey":       self._api_key,
+                    "Request-Time": ts,
+                    "Content-Type": "application/json",
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+            if data.get("success"):
+                return {
+                    "status":      "ok",
+                    "paper":       False,
+                    "exchange":    "MEXC",
+                    "symbol":      symbol,
+                    "close_price": price,
+                    "timestamp":   int(time.time()),
+                    "raw":         data,
+                }
+            return {"status": "error", "msg": data.get("message", "MEXC close rejected")}
+
+        except Exception as e:
+            return {"status": "error", "msg": str(e)}
 
     async def close(self):
-        if self._http and not self._http.is_closed:
-            await self._http.aclose()
-
-    async def _get(self, path: str, params: dict = None) -> dict:
-        try:
-            r = await self.http.get(path, params=params)
-            r.raise_for_status()
-            return r.json()
-        except Exception as e:
-            log.warning(f"[mexc] GET {path} failed: {e}")
-            return {"success": False}
-
-    async def fetch_candles(
-        self, symbol: str, interval: str, limit: int = 100
-    ) -> list[dict]:
-        """
-        Fetch OHLCV candles from MEXC.
-        Returns list of dicts: {open, high, low, close, volume}
-        MEXC response: data.{time, open, high, low, close, vol}
-        """
-        data = await self._get(
-            f"/api/v1/contract/kline/{symbol}",
-            params={"interval": interval, "count": limit},
-        )
-        if not data.get("success"):
-            return []
-        d = data.get("data") or {}
-        times  = d.get("time",  [])
-        opens  = d.get("open",  [])
-        highs  = d.get("high",  [])
-        lows   = d.get("low",   [])
-        closes = d.get("close", [])
-        vols   = d.get("vol",   [])
-        candles = []
-        for i in range(len(closes)):
-            try:
-                candles.append({
-                    "time":   int(times[i])  if i < len(times)  else 0,
-                    "open":   float(opens[i])  if i < len(opens)  else 0.0,
-                    "high":   float(highs[i])  if i < len(highs)  else 0.0,
-                    "low":    float(lows[i])   if i < len(lows)   else 0.0,
-                    "close":  float(closes[i]),
-                    "volume": float(vols[i])   if i < len(vols)   else 0.0,
-                })
-            except (ValueError, TypeError):
-                continue
-        return candles
-
-    async def fetch_orderbook(self, symbol: str, limit: int = 20) -> dict:
-        """
-        Fetch order-book depth.
-        Returns {bids: [{px, sz}], asks: [{px, sz}]}
-        MEXC response: data.{asks: [[price,vol],...], bids: [[price,vol],...]}
-        """
-        data = await self._get(
-            f"/api/v1/contract/depth/{symbol}",
-            params={"limit": limit},
-        )
-        if not data.get("success"):
-            return {"bids": [], "asks": []}
-        raw = data.get("data") or {}
-        def _parse(levels):
-            out = []
-            for lv in (levels or []):
-                try:
-                    out.append({"px": float(lv[0]), "sz": float(lv[1])})
-                except (IndexError, TypeError, ValueError):
-                    pass
-            return out
-        return {
-            "bids": _parse(raw.get("bids", [])),
-            "asks": _parse(raw.get("asks", [])),
-        }
-
-    async def fetch_price(self, symbol: str) -> Optional[float]:
-        """Fetch latest traded price from public ticker."""
-        data = await self._get(
-            "/api/v1/contract/ticker",
-            params={"symbol": symbol},
-        )
-        if not data.get("success"):
-            return None
-        try:
-            return float(data["data"]["lastPrice"])
-        except (KeyError, TypeError, ValueError):
-            return None
-
-    async def fetch_funding_rate(self, symbol: str) -> float:
-        """Fetch current funding rate. Returns 0.0 on failure."""
-        data = await self._get(
-            "/api/v1/contract/funding_rate",
-            params={"symbol": symbol},
-        )
-        if not data.get("success"):
-            return 0.0
-        try:
-            return float(data["data"]["fundingRate"])
-        except (KeyError, TypeError, ValueError):
-            return 0.0
+        await self._http.aclose()

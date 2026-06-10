@@ -1,645 +1,1384 @@
-"""
-main.py — MEXC Bounce Scanner FastAPI application.
-"""
-
 import asyncio
+import csv
+import io
 import logging
 import os
 import time
-import uuid
+import threading
+import requests
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
-from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
-import httpx
-
 load_dotenv()
 
+_EDT = timezone(timedelta(hours=-4))
+DEPLOY_TIME = datetime.now(_EDT).strftime("%Y-%m-%d %H:%M EDT")
+
+_scanner_log = logging.getLogger("scanner")
+if not _scanner_log.handlers:
+    _sh = logging.StreamHandler()
+    _sh.setFormatter(logging.Formatter("%(levelname)s:%(name)s: %(message)s"))
+    _scanner_log.addHandler(_sh)
+_scanner_log.setLevel(logging.INFO)
+_scanner_log.propagate = False
+
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from pydantic import BaseModel
+
 from config import (
-    PAIRS, SCAN_INTERVAL_SECONDS, PRICE_INTERVAL_SECONDS, PAPER_MODE,
-    LIVE_MANUAL_ENTRY_ONLY, SUPABASE_URL, SUPABASE_KEY,
-    MARGIN_PER_TRADE, MARGIN_HARD_CAP, CONSECUTIVE_LOSS_STOP,
-    DAILY_LOSS_LIMIT, TP1_R, TP2_R,
+    PAIRS, SCAN_INTERVAL_SECONDS, PRICE_INTERVAL_SECONDS,
+    MARGIN_PER_TRADE, MARGIN_HARD_CAP, PAPER_MODE, LIVE_MANUAL_ENTRY_ONLY,
+    CONSECUTIVE_LOSS_STOP, DAILY_LOSS_LIMIT, TP1_R, TP2_R,
+    SUPABASE_URL, SUPABASE_KEY,
 )
+from supabase import create_client, Client
 from mexc_client import MexcClient
-import scanner as sc
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s  %(levelname)-7s  %(name)s  %(message)s",
+from scanner import (
+    run_full_scan, scan_pair_state, get_pending,
+    get_scan_count, set_close_cooldown, clear_cooldown,
+    get_cooldown_remaining, clear_all_scanner_state, log_startup_config,
+    compute_market_health, get_session_name,
 )
-log = logging.getLogger("main")
+import scanner as _scanner_mod  # direct access to _cooldowns dict for persistence
 
-# ── Telegram ───────────────────────────────────────────────────────────────────
+# ── Telegram config ────────────────────────────────────────────
+TELEGRAM_BOT_TOKEN  = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID    = int(os.environ.get("TELEGRAM_CHAT_ID", "0") or "0")
+TELEGRAM_ENABLED    = os.environ.get("TELEGRAM_ENABLED", "true").lower() == "true"
+_pending_reminders: dict = {}
 
-TELEGRAM_ENABLED = os.environ.get("TELEGRAM_ENABLED", "true").lower() == "true"
-TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-TELEGRAM_CHAT_ID   = os.environ.get("TELEGRAM_CHAT_ID", "")
-_reminder_tasks: dict[str, asyncio.Task] = {}
-
-
-async def _tg_post(text: str):
-    if not TELEGRAM_ENABLED or not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        log.info(f"[TG] {text[:100]}")
-        return
-    try:
-        async with httpx.AsyncClient(timeout=6) as hc:
-            await hc.post(
-                f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
-                json={"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "HTML"},
-            )
-    except Exception as e:
-        log.warning(f"[TG] send failed: {e}")
+# ── Global safety state ────────────────────────────────────────────────────────
+consecutive_losses:     int   = 0
+circuit_breaker_active: bool  = False
+daily_pnl:              float = 0.0
+trading_halted_today:   bool  = False
+_last_midnight_day:     int   = datetime.now(timezone.utc).day
 
 
-async def send_alert_telegram(alert: dict):
-      sym   = alert["symbol"]
-      disp  = sym.replace("_USDT", "")
-      d     = alert["direction"]
-      tier  = alert["tier"]
-      lev   = alert["leverage"]
-      price = alert["price"]
-      sl    = alert["sl_price"]
-      tp1   = alert["tp1_price"]
-      tp2   = alert["tp2_price"]
-      j15m  = alert["j15m"]
-      j1h   = alert["j1h"]
-      rsi   = alert["rsi15m"]
-      adx   = alert["adx"]
-      sess  = alert.get("session", "")
-      arrow = chr(9660) if d == "SHORT" else chr(9650)
-      NL    = chr(10)
-      msg = (
-          chr(128992) + " <b>MEXC BOUNCE</b>" + NL
-          + f"{arrow} <b>{disp} {d}</b> [{tier} {lev}x]" + NL
-          + f"Entry: <code>{price}</code>" + NL
-          + f"SL:    <code>{sl}</code>" + NL
-          + f"TP1:   <code>{tp1}</code>  (50% close)" + NL
-          + f"TP2:   <code>{tp2}</code>  (50% close)" + NL
-          + NL
-          + f"J15M: {j15m:.1f}  J1H: {j1h:.1f}  RSI: {rsi:.1f}  ADX: {adx:.1f}" + NL
-          + f"Session: {sess}  |  Margin: $" + str(MARGIN_PER_TRADE) + NL
-          + f"#MEXC_BOUNCE #{disp} #{d}"
-      )
-      await _tg_post(msg)
-
-
-async def _reminder_task(trade_id: str, sym: str, d: str, entry: float, sl: float, tp1: float, tp2: float):
-      await asyncio.sleep(1800)
-      disp  = sym.replace("_USDT", "")
-      arrow = chr(9660) if d == "SHORT" else chr(9650)
-      NL    = chr(10)
-      msg = (
-          chr(128992) + " <b>MEXC BOUNCE — 30m REMINDER</b>" + NL
-          + f"{arrow} <b>{disp} {d}</b>  still open" + NL
-          + f"Entry: {entry}  SL: {sl}  TP1: {tp1}  TP2: {tp2}"
-      )
-      await _tg_post(msg)
-
-
-def start_reminder(trade_id: str, sym: str, d: str, entry: float, sl: float, tp1: float, tp2: float):
-    cancel_reminder(trade_id)
-    t = asyncio.create_task(_reminder_task(trade_id, sym, d, entry, sl, tp1, tp2))
-    _reminder_tasks[trade_id] = t
-
-
-def cancel_reminder(trade_id: str):
-    t = _reminder_tasks.pop(trade_id, None)
-    if t:
-        t.cancel()
-
-
-async def send_exit_telegram(trade: dict, reason: str, pnl: float):
-      sym   = trade["symbol"]
-      disp  = sym.replace("_USDT", "")
-      d     = trade["direction"]
-      entry = trade["entry_price"]
-      exit_p = trade.get("exit_price", trade.get("close_price", 0))
-      pnl_sign = "+" if pnl >= 0 else ""
-      ok_emoji = chr(9989) if pnl >= 0 else chr(10060)
-      NL    = chr(10)
-      msg = (
-          chr(128992) + " <b>MEXC BOUNCE — EXIT</b> " + ok_emoji + NL
-          + f"<b>{disp} {d}</b>  [{reason}]" + NL
-          + f"Entry: {entry}  Exit: {exit_p}" + NL
-          + f"PnL: <b>{pnl_sign}{pnl:.2f} USDT</b>" + NL
-          + f"#MEXC_BOUNCE #{disp}"
-      )
-      await _tg_post(msg)
-
-
-def _get_supabase():
-    if not SUPABASE_URL or not SUPABASE_KEY:
-        return None
-    try:
-        from supabase import create_client
-        return create_client(SUPABASE_URL, SUPABASE_KEY)
-    except Exception as e:
-        log.warning(f"[DB] Supabase init failed: {e}")
-        return None
-
-
-def _save_state(state: dict):
-    sb = _get_supabase()
-    if not sb:
-        return
-    try:
-        existing = sb.table("scanner_state").select("id").execute()
-        payload  = {"key": "mexc_bounce_scanner", "state": state}
-        if existing.data:
-            sb.table("scanner_state").update(payload).eq("id", existing.data[0]["id"]).execute()
-        else:
-            sb.table("scanner_state").insert(payload).execute()
-    except Exception as e:
-        log.warning(f"[DB] save_state: {e}")
-
-
-def _load_state() -> Optional[dict]:
-    sb = _get_supabase()
-    if not sb:
-        return None
-    try:
-        res = sb.table("scanner_state").select("state").eq("key", "mexc_bounce_scanner").execute()
-        if res.data:
-            return res.data[0]["state"]
-    except Exception as e:
-        log.warning(f"[DB] load_state: {e}")
-    return None
-
-
-def _append_trade_log(trade: dict):
-    sb = _get_supabase()
-    if not sb:
-        return
-    try:
-        row = {**trade, "exchange": "MEXC"}
-        sb.table("trade_log").insert(row).execute()
-    except Exception as e:
-        log.warning(f"[DB] append_trade_log: {e}")
-
-
-def _load_trade_log() -> list:
-    sb = _get_supabase()
-    if not sb:
-        return []
-    try:
-        res = (
-            sb.table("trade_log")
-            .select("*")
-            .eq("exchange", "MEXC")
-            .order("opened_at", desc=True)
-            .limit(1000)
-            .execute()
-        )
-        return res.data or []
-    except Exception as e:
-        log.warning(f"[DB] load_trade_log: {e}")
-        return []
-
-
-# ── App state ──────────────────────────────────────────────────────────────────
+# ── App state ─────────────────────────────────────────────────────────────────
 
 class AppState:
     def __init__(self):
-        self.paper_mode: bool = PAPER_MODE
-        self.live_manual: bool = LIVE_MANUAL_ENTRY_ONLY
-        self.scan_count: int = 0
-        self.prices: dict[str, float] = {}
-        self.pair_data: dict[str, dict] = {}
-        self.open_trades: list[dict] = []
-        self.trade_log: list[dict] = []
-        self.alerts: list[dict] = []
-        self.market_health: dict = {}
-        self.daily_pnl: float = 0.0
-        self.daily_pnl_date: str = ""
-        self.consecutive_losses: int = 0
-        self.circuit_breaker: bool = False
-        self.last_scan_ts: float = 0.0
+        self.pair_states:          list[dict]        = []
+        self.alerts:               list[dict]        = []
+        self.prices:               dict[str, float]  = {}
+        self.price_changes:        dict[str, float]  = {}
+        self.open_trades:          dict[str, dict]   = {}
+        self.trade_log:            list[dict]        = []
+        self.margin_deployed:      float             = 0.0
+        self.trades_opened:        int               = 0
+        self.last_scan_at:         Optional[int]     = None
+        self.scan_snapshots:       dict              = {}  # symbol -> last 3 scan snapshots
+        self.market_health:        dict              = {}
 
     @property
-    def deployed_margin(self) -> float:
-        return sum(t.get("margin", 0) for t in self.open_trades)
+    def slots_used(self) -> int:
+        return len(self.open_trades)
+
+    @property
+    def cap_reached(self) -> bool:
+        return self.margin_deployed >= MARGIN_HARD_CAP
+
+    def trade_key(self, symbol: str, direction: str) -> str:
+        return f"{symbol}{direction}"
 
     def serialise(self) -> dict:
+        global consecutive_losses, circuit_breaker_active, daily_pnl, trading_halted_today
+
+        trades_out = {}
+        for k, t in self.open_trades.items():
+            entry   = t["entry_price"]
+            current = self.prices.get(t["symbol"], entry)
+            dir_    = t["direction"]
+            size    = t.get("size", 0)
+            margin  = t.get("margin", 0)
+            lev     = t.get("leverage", 1)
+            sl_dist = t.get("sl_dist", 0) or 0
+
+            pnl = (current - entry) * size if dir_ == "LONG" else (entry - current) * size
+            dollar_risk = margin * lev * (sl_dist / entry) if entry else 0
+            r   = round(pnl / dollar_risk, 2) if dollar_risk else 0
+
+            trailing_sl = None
+            if t.get("tp1_hit") and t.get("extreme_price"):
+                ep = t["extreme_price"]
+                atr = t.get("sl_dist", 0) or 0
+                trailing_sl = round(ep * (1 + 0.005) if dir_ == "SHORT"
+                                    else ep * (1 - 0.005), 6)
+
+            trades_out[k] = {
+                **t,
+                "current_price":  current,
+                "unrealized_pnl": round(pnl, 2),
+                "r":              r,
+                "elapsed_s":      int(time.time()) - t.get("opened_at", int(time.time())),
+                "trailing_sl":    trailing_sl,
+            }
+
+        pair_states_out = []
+        for ps in self.pair_states:
+            sym = ps.get("symbol", "")
+            pair_states_out.append({
+                **ps,
+                "cooldown_short": get_cooldown_remaining(sym, "SHORT"),
+                "cooldown_long":  get_cooldown_remaining(sym, "LONG"),
+            })
+
+        pair_order = {s: i for i, s in enumerate(PAIRS)}
+        pair_states_out.sort(key=lambda p: pair_order.get(p.get("symbol", ""), 999))
+
+        for i, ps in enumerate(pair_states_out):
+            sym = ps.get("symbol", "")
+            kl, ks = self.trade_key(sym, "LONG"), self.trade_key(sym, "SHORT")
+            in_trade = kl in trades_out or ks in trades_out
+            cd_s = get_cooldown_remaining(sym, "SHORT")
+            cd_l = get_cooldown_remaining(sym, "LONG")
+            pair_states_out[i] = {
+                **ps,
+                "in_trade":      in_trade,
+                "cooldown_short": cd_s,
+                "cooldown_long":  cd_l,
+            }
+
         return {
-            "paper_mode":         self.paper_mode,
-            "live_manual":        self.live_manual,
-            "scan_count":         self.scan_count,
-            "prices":             self.prices,
-            "pair_data":          self.pair_data,
-            "open_trades":        self.open_trades,
-            "trade_log":          self.trade_log[-200:],
-            "alerts":             self.alerts[-50:],
-            "market_health":      self.market_health,
-            "daily_pnl":          round(self.daily_pnl, 2),
-            "deployed_margin":    round(self.deployed_margin, 2),
-            "consecutive_losses": self.consecutive_losses,
-            "circuit_breaker":    self.circuit_breaker,
-            "last_scan_ts":       self.last_scan_ts,
-            "session":            sc.get_session_name(),
+            "pair_states":    pair_states_out,
+            "alerts":         self.alerts,
+            "pending_alerts": get_pending(),
+            "prices":         self.prices,
+            "open_trades":    trades_out,
+            "trade_log":      self.trade_log,
+            "account": {
+                "margin_deployed": round(self.margin_deployed, 2),
+                "cap":             MARGIN_HARD_CAP,
+                "cap_pct":         round(self.margin_deployed / MARGIN_HARD_CAP * 100, 1),
+                "cap_reached":     self.cap_reached,
+                "trades_opened":   self.trades_opened,
+                "paper_mode":            PAPER_MODE,
+                "live_manual_entry_only": LIVE_MANUAL_ENTRY_ONLY,
+                "slots_used":            self.slots_used,
+            },
+            "circuit_breaker": {
+                "active":             circuit_breaker_active,
+                "consecutive_losses": consecutive_losses,
+                "stop_at":            CONSECUTIVE_LOSS_STOP,
+            },
+            "daily": {
+                "pnl":    round(daily_pnl, 2),
+                "limit":  DAILY_LOSS_LIMIT,
+                "halted": trading_halted_today,
+            },
+            "scan_count":       get_scan_count(),
+            "last_scan_at":     self.last_scan_at,
+            "price_changes":    self.price_changes,
+            "deploy_time":      DEPLOY_TIME,
+            "market_health":    self.market_health,
         }
 
 
-state = AppState()
-mexc  = MexcClient()
+app_state  = AppState()
+mexc_client: Optional[MexcClient] = None
 
 
-# ── Trade lifecycle ────────────────────────────────────────────────────────────
+# ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _ensure_daily_reset():
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    if state.daily_pnl_date != today:
-        state.daily_pnl_date   = today
-        state.daily_pnl        = 0.0
-        state.consecutive_losses = 0
-        state.circuit_breaker  = False
+def _retire_alert(symbol: str, direction: str):
+    app_state.alerts = [
+        a for a in app_state.alerts
+        if not (a["symbol"] == symbol and a["direction"] == direction)
+    ]
 
 
-def _calc_pnl(trade: dict, exit_price: float) -> float:
-    d     = trade["direction"]
-    entry = trade["entry_price"]
-    margin = trade.get("margin", MARGIN_PER_TRADE)
-    lev   = trade.get("leverage", 5)
-    pos_val = margin * lev
-    if d == "LONG":
-        return (exit_price - entry) / entry * pos_val
+# ── Persistence ────────────────────────────────────────────────────────────────
+
+# ── Supabase client ────────────────────────────────────────────────────────────
+
+_supabase: Optional[Client] = None
+
+
+def _get_supabase() -> Optional[Client]:
+    global _supabase
+    if _supabase is None:
+        if SUPABASE_URL and SUPABASE_KEY:
+            try:
+                _supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+            except Exception as _e:
+                print(f"[PERSIST] Supabase client init error: {_e}")
+        else:
+            print("[PERSIST] SUPABASE_URL/KEY not set — persistence disabled")
+    return _supabase
+
+
+def _save_state():
+    """Upsert full scanner state to Supabase scanner_state table (row id=1)."""
+    sb = _get_supabase()
+    if sb is None:
+        return
+    try:
+        data = {
+            "id":                     1,
+            "saved_date":             datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+            "open_trades":            app_state.open_trades,
+            "margin_deployed":        app_state.margin_deployed,
+            "daily_pnl":              daily_pnl,
+            "trading_halted_today":   trading_halted_today,
+            "consecutive_losses":     consecutive_losses,
+            "circuit_breaker_active": circuit_breaker_active,
+            "cooldowns":              dict(_scanner_mod._cooldowns),
+            "updated_at":             datetime.now(timezone.utc).isoformat(),
+        }
+        sb.table("scanner_state").upsert(data).execute()
+    except Exception as _e:
+        print(f"[PERSIST] save error: {_e}")
+
+
+def _load_state():
+    """On startup: restore all state from Supabase."""
+    global daily_pnl, trading_halted_today, consecutive_losses, circuit_breaker_active
+    sb = _get_supabase()
+    if sb is None:
+        print("[RESTORE] No Supabase client — starting fresh")
+        return
+    try:
+        # ── Trade log → in-memory list ─────────────────────────────────────────
+        log_rows = sb.table("trade_log").select("*").eq("exchange", "MEXC").order("created_at").limit(1000).execute()
+        if log_rows.data:
+            for row in log_rows.data:
+                def _ts(iso):
+                    if not iso:
+                        return 0
+                    try:
+                        return int(datetime.fromisoformat(
+                            iso.replace("Z", "+00:00")).timestamp())
+                    except Exception:
+                        return 0
+                def _fn(k):
+                    v = row.get(k)
+                    return float(v) if v is not None else None
+                app_state.trade_log.append({
+                    "timestamp_opened": _ts(row.get("open_time")),
+                    "timestamp_closed": _ts(row.get("close_time")),
+                    "symbol":           row.get("pair", ""),
+                    "direction":        row.get("direction", ""),
+                    "tier":             row.get("tier"),
+                    "adx1h":            None,
+                    "score":            None,
+                    "entry_price":      _fn("entry_price"),
+                    "sl_price":         _fn("sl"),
+                    "tp1_price":        _fn("tp1"),
+                    "tp2_price":        _fn("tp2"),
+                    "exit_price":       _fn("exit_price"),
+                    "exit_reason":      row.get("exit_reason", ""),
+                    "pnl_usd":          float(row.get("pnl_dollars") or 0),
+                    "r_value":          float(row.get("r_value") or 0),
+                    "duration_seconds": int(row.get("duration_seconds") or 0),
+                    "exchange":         row.get("exchange", "MEXC"),
+                    "paper":            True,
+                })
+            print(f"[RESTORE] trade log: {len(log_rows.data)} entries restored")
+
+        # ── Scanner state ──────────────────────────────────────────────────────
+        result = sb.table("scanner_state").select("*").eq("id", 1).execute()
+        if not result.data:
+            print("[RESTORE] No state row found — starting fresh")
+            return
+        data = result.data[0]
+
+        # ── New-day check ──────────────────────────────────────────────────────
+        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        if data.get("saved_date") != today_str:
+            saved = data.get("saved_date", "unknown")
+            print(f"[DAILY RESET] New trading day ({saved} → {today_str}) — P&L reset to $0")
+            daily_pnl              = 0.0
+            trading_halted_today   = False
+            consecutive_losses     = 0
+            circuit_breaker_active = False
+            _save_state()
+            return
+
+        # ── Restore globals ────────────────────────────────────────────────────
+        daily_pnl              = float(data.get("daily_pnl") or 0)
+        trading_halted_today   = bool(data.get("trading_halted_today", False))
+        consecutive_losses     = int(data.get("consecutive_losses") or 0)
+        circuit_breaker_active = bool(data.get("circuit_breaker_active", False))
+        app_state.margin_deployed = float(data.get("margin_deployed") or 0)
+
+        # ── Restore open trades ────────────────────────────────────────────────
+        for key, trade in (data.get("open_trades") or {}).items():
+            app_state.open_trades[key] = trade
+            print(f"[RESTORE] {trade.get('symbol')} {trade.get('direction')} "
+                  f"entry={trade.get('entry_price')} sl={trade.get('sl_price')} "
+                  f"tp1={trade.get('tp1_price')} restored")
+
+        # ── Restore cooldowns (filter expired) ────────────────────────────────
+        now     = time.time()
+        dropped = 0
+        for key, expiry in (data.get("cooldowns") or {}).items():
+            if float(expiry) > now:
+                _scanner_mod._cooldowns[key] = float(expiry)
+            else:
+                dropped += 1
+                print(f"[RESTORE] cooldown {key} expired — dropped")
+        if dropped:
+            print(f"[RESTORE] {dropped} expired cooldown(s) dropped")
+
+        print(f"[RESTORE] complete — trades={len(app_state.open_trades)} "
+              f"daily_pnl=${daily_pnl:.2f} cooldowns={len(_scanner_mod._cooldowns)} "
+              f"cb={consecutive_losses}/{CONSECUTIVE_LOSS_STOP}")
+
+    except Exception as _e:
+        print(f"[RESTORE] Error: {_e} — starting fresh")
+
+
+def _update_daily_pnl(pnl: float):
+    global daily_pnl, trading_halted_today
+    daily_pnl = round(daily_pnl + pnl, 2)
+    if not trading_halted_today and daily_pnl <= DAILY_LOSS_LIMIT:
+        trading_halted_today = True
+        print(f"[DAILY LIMIT] daily_pnl=${daily_pnl:.2f} — trading halted")
+    _save_state()
+
+
+def _on_trade_close(reason: str):
+    global consecutive_losses, circuit_breaker_active
+    if reason == "SL":
+        consecutive_losses += 1
+        print(f"[CIRCUIT BREAKER] consecutive_losses={consecutive_losses}/{CONSECUTIVE_LOSS_STOP}")
+        if consecutive_losses >= CONSECUTIVE_LOSS_STOP and not circuit_breaker_active:
+            circuit_breaker_active = True
+            print("[CIRCUIT BREAKER] ACTIVE — auto-entry paused")
     else:
-        return (entry - exit_price) / entry * pos_val
+        consecutive_losses = 0
+    _save_state()
 
 
-def _open_paper_trade(alert: dict) -> dict:
-    trade_id = str(uuid.uuid4())[:8]
-    trade = {
-        "id":          trade_id,
-        "symbol":      alert["symbol"],
-        "direction":   alert["direction"],
-        "tier":        alert["tier"],
-        "leverage":    alert["leverage"],
-        "margin":      MARGIN_PER_TRADE,
-        "entry_price": alert["price"],
-        "sl_price":    alert["sl_price"],
-        "tp1_price":   alert["tp1_price"],
-        "tp2_price":   alert["tp2_price"],
-        "be_price":    alert.get("be_price", alert["price"]),
-        "sl_dist":     alert.get("sl_dist", 0),
-        "tp1_hit":     False,
-        "status":      "OPEN",
-        "opened_at":   datetime.now(timezone.utc).isoformat(),
-        "j15m":        alert.get("j15m"),
-        "j1h":         alert.get("j1h"),
-        "rsi15m":      alert.get("rsi15m"),
-        "adx":         alert.get("adx"),
-        "session":     alert.get("session"),
-        "exchange":    "MEXC",
+def _append_trade_log(trade: dict, exit_price: float, reason: str, pnl: float, r: float):
+    now_ts    = int(time.time())
+    opened_at = trade.get("opened_at", now_ts)
+
+    # ── In-memory entry (powers the LOG tab + CSV export) ─────────────────────
+    entry = {
+        "timestamp_opened": opened_at,
+        "timestamp_closed": now_ts,
+        "symbol":           trade["symbol"],
+        "direction":        trade["direction"],
+        "score":            trade.get("score"),
+        "adx1h":            trade.get("adx1h"),
+        "tier":             trade.get("tier"),
+        "entry_price":      trade.get("entry_price"),
+        "sl_price":         trade.get("sl_price"),
+        "tp1_price":        trade.get("tp1_price"),
+        "tp2_price":        trade.get("tp2_price"),
+        "exit_price":       exit_price,
+        "exit_reason":      reason,
+        "pnl_usd":          round(pnl, 2),
+        "r_value":          r,
+        "duration_seconds": now_ts - opened_at,
+        "exchange":         "MEXC",
+        "paper":            trade.get("paper", True),
     }
-    state.open_trades.append(trade)
-    _append_trade_log({**trade, "status": "OPEN"})
-    start_reminder(trade_id, trade["symbol"], trade["direction"],
-                   trade["entry_price"], trade["sl_price"],
-                   trade["tp1_price"], trade["tp2_price"])
-    return trade
+    app_state.trade_log.append(entry)
+
+    # ── Supabase insert ────────────────────────────────────────────────────────
+    sb = _get_supabase()
+    if sb is not None:
+        try:
+            open_iso  = datetime.fromtimestamp(opened_at, tz=timezone.utc).isoformat()
+            close_iso = datetime.fromtimestamp(now_ts,    tz=timezone.utc).isoformat()
+            sb.table("trade_log").insert({
+                "pair":             trade["symbol"],
+                "direction":        trade["direction"],
+                "tier":             trade.get("tier"),
+                "leverage":         trade.get("leverage"),
+                "exchange":         "MEXC",
+                "entry_price":      trade.get("entry_price"),
+                "exit_price":       exit_price,
+                "sl":               trade.get("sl_price"),
+                "tp1":              trade.get("tp1_price"),
+                "tp2":              trade.get("tp2_price"),
+                "exit_reason":      reason,
+                "pnl_dollars":      round(pnl, 2),
+                "r_value":          r,
+                "open_time":        open_iso,
+                "close_time":       close_iso,
+                "duration_seconds": now_ts - opened_at,
+            }).execute()
+        except Exception as _e:
+            print(f"[PERSIST] trade_log insert error: {_e}")
 
 
-def _close_trade(trade: dict, exit_price: float, reason: str):
-    pnl = _calc_pnl(trade, exit_price)
-    if trade.get("tp1_hit"):
-        pnl = pnl / 2   # only 50% remains after TP1
-    trade.update({
-        "status":       "CLOSED",
-        "exit_price":   exit_price,
-        "close_reason": reason,
-        "pnl":          round(pnl, 2),
-        "closed_at":    datetime.now(timezone.utc).isoformat(),
-    })
-    state.open_trades = [t for t in state.open_trades if t["id"] != trade["id"]]
-    state.trade_log.insert(0, trade)
-    state.daily_pnl += pnl
-    if pnl < 0:
-        state.consecutive_losses += 1
-        if state.consecutive_losses >= CONSECUTIVE_LOSS_STOP:
-            state.circuit_breaker = True
-            log.warning(f"[CB] Circuit breaker ON — {state.consecutive_losses} consecutive losses")
-    else:
-        state.consecutive_losses = 0
-    cancel_reminder(trade["id"])
-    _append_trade_log(trade)
-    asyncio.create_task(send_exit_telegram(trade, reason, pnl))
+
+# ── Paper trade Supabase logging ─────────────────────────────────────────────
+
+async def _save_paper_trade(trade: dict, alert: dict):
+    """Insert a row into bounce_paper_trades when a paper trade opens."""
+    if not PAPER_MODE or not supabase:
+        return
+    try:
+        row = {
+            "pair":          trade["symbol"],
+            "direction":     trade["direction"],
+            "score":         alert.get("score"),
+            "tier":          trade.get("tier"),
+            "is_score10":    trade.get("is_score10", False),
+            "leverage":      trade.get("leverage"),
+            "margin":        trade.get("margin"),
+            "entry_price":   trade.get("entry_price"),
+            "sl_price":      trade.get("sl_price"),
+            "tp1_price":     trade.get("tp1_price"),
+            "tp2_price":     trade.get("tp2_price"),
+            "sl_pct":        round(trade.get("sl_dist", 0) / trade.get("entry_price", 1), 6)
+                             if trade.get("entry_price") else None,
+            "adx":           alert.get("adx1h"),
+            "trend":         alert.get("trend"),
+            "j_value":       alert.get("j15m"),
+            "rsi":           alert.get("rsi15m"),
+            "fired_at":      datetime.fromtimestamp(
+                                 trade.get("opened_at", int(time.time())), tz=timezone.utc
+                             ).isoformat(),
+            "session":       trade.get("session", ""),
+            "paper_mode":    True,
+            "status":        "OPEN",
+        }
+        await asyncio.to_thread(
+            lambda: supabase.table("bounce_paper_trades").insert(row).execute()
+        )
+    except Exception as e:
+        print(f"[PAPER LOG] insert error: {e}")
 
 
-def _partial_close_tp1(trade: dict, price: float):
-    pnl_half = _calc_pnl(trade, price) / 2
-    state.daily_pnl += pnl_half
-    trade["tp1_hit"] = True
-    trade["tp1_price_actual"] = price
-    trade["tp1_pnl"] = round(pnl_half, 2)
-    # Move SL to BE
-    trade["sl_price"] = trade.get("be_price", trade["entry_price"])
-    log.info(f"[TP1] {trade['symbol']} {trade['direction']} partial close @ {price}, PnL: {pnl_half:.2f}")
-    asyncio.create_task(
-        send_exit_telegram(trade, "TP1 hit (50% closed)", pnl_half)
+async def _update_paper_trade_close(trade: dict, exit_price: float,
+                                    reason: str, pnl: float):
+    """Update the bounce_paper_trades row when a paper trade closes."""
+    if not PAPER_MODE or not supabase:
+        return
+    try:
+        opened_at = trade.get("opened_at", int(time.time()))
+        duration  = round((int(time.time()) - opened_at) / 60, 1)
+        await asyncio.to_thread(
+            lambda: supabase.table("bounce_paper_trades")
+                    .update({
+                        "close_price":      exit_price,
+                        "close_reason":     reason,
+                        "pnl":              round(pnl, 2),
+                        "duration_minutes": duration,
+                        "status":           "WIN" if pnl >= 0 else "LOSS",
+                        "closed_at":        datetime.now(timezone.utc).isoformat(),
+                    })
+                    .eq("pair",      trade["symbol"])
+                    .eq("direction", trade["direction"])
+                    .eq("status",    "OPEN")
+                    .execute()
+        )
+    except Exception as e:
+        print(f"[PAPER LOG] update error: {e}")
+
+
+async def _do_open_trade(
+    symbol: str, direction: str,
+    margin_usdc: float, leverage: int,
+    alert_data: Optional[dict] = None,
+    exchange: str = "MEXC",
+) -> tuple[Optional[dict], Optional[str]]:
+    global circuit_breaker_active, trading_halted_today
+
+    if app_state.margin_deployed + margin_usdc > MARGIN_HARD_CAP:
+        return None, "cap_reached"
+    if circuit_breaker_active:
+        return None, "circuit_breaker"
+    if trading_halted_today:
+        return None, "daily_limit"
+
+    key = app_state.trade_key(symbol, direction)
+    if key in app_state.open_trades:
+        return None, "already_open"
+
+    _client = mexc_client
+    sl_price = alert_data.get("sl_price") if alert_data else None
+    result   = await _client.open_position(
+        symbol, direction, margin_usdc, leverage, sl_price=sl_price
     )
-    _append_trade_log({**trade, "status": "TP1_HIT"})
+    if result.get("status") != "ok":
+        return None, result.get("msg", "open_failed")
+
+    entry = result["entry_price"]
+    if not entry or entry == 0.0:
+        print(f"[TRADE BLOCKED] {symbol} {direction} null price rejected")
+        return None, "null_price"
+
+    size = result.get("size", (margin_usdc * leverage) / entry if entry else 0)
+
+    trade = {
+        "symbol":     symbol,
+        "direction":  direction,
+        "entry_price": entry,
+        "size":       size,
+        "remaining_size": size,
+        "margin":     margin_usdc,
+        "leverage":   leverage,
+        "opened_at":  int(time.time()),
+        "paper":      result.get("paper", True),
+        "exchange":   exchange,
+        "sl_price":   alert_data.get("sl_price")  if alert_data else None,
+        "sl_dist":    alert_data.get("sl_dist")   if alert_data else None,
+        "tp1_price":  alert_data.get("tp1_price") if alert_data else None,
+        "tp2_price":  alert_data.get("tp2_price") if alert_data else None,
+        "score":      alert_data.get("score")     if alert_data else None,
+        "tier":       alert_data.get("tier")      if alert_data else None,
+        "adx1h":      alert_data.get("adx1h")     if alert_data else None,
+        "j15m":       alert_data.get("j15m")      if alert_data else None,
+        "j1h":        alert_data.get("j1h")       if alert_data else None,
+        "rsi15m":     alert_data.get("rsi15m")    if alert_data else None,
+        "bid_pct":    alert_data.get("bid_pct")   if alert_data else None,
+        "ask_pct":    alert_data.get("ask_pct")   if alert_data else None,
+        "be_price":   round(entry * 1.001, 6) if direction == "LONG" else round(entry * 0.999, 6),
+        "tp1_hit":       False,
+        "partial_hit":   False,
+        "is_score10":    alert_data.get("is_score10", False) if alert_data else False,
+        "partial_price": alert_data.get("partial_price")     if alert_data else None,
+        "session":       alert_data.get("session", "")       if alert_data else "",
+        "extreme_price": None,
+    }
+
+    app_state.open_trades[key] = trade
+    app_state.margin_deployed += margin_usdc
+    app_state.trades_opened   += 1
+
+    if PAPER_MODE and alert_data:
+        asyncio.create_task(_save_paper_trade(trade, alert_data))
+
+    for a in app_state.alerts:
+        if a["symbol"] == symbol and a["direction"] == direction:
+            a["is_in_trade"] = True
+
+    print(f"[TRADE OPEN] {symbol} {direction} tier={trade.get('tier')} "
+          f"entry={entry} sl={trade.get('sl_price')} tp1={trade.get('tp1_price')} "
+          f"lev={leverage}x exchange={exchange}")
+    _save_state()
+    return trade, None
 
 
-# ── Exit monitor ───────────────────────────────────────────────────────────────
+# ━━ Telegram alerting ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-async def _exit_monitor_loop():
+_TREND_EMOJI = {
+    "Strong Bull": "🚀",
+    "Bullish":     "📈",
+    "Neutral":     "➡️",
+    "Bearish":     "📉",
+    "Strong Bear": "🔻",
+}
+
+
+def _fmt_p(v: float) -> str:
+    if v >= 1000: return f"{v:,.2f}"
+    if v >= 1:    return f"{v:.4f}"
+    return f"{v:.6f}"
+
+
+def _tg_post(msg: str) -> None:
+    """POST to Telegram in a daemon thread — never blocks the scan loop."""
+    def _send(text: str, parse_mode: str) -> None:
+        url  = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+        data = {"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": parse_mode}
+        try:
+            requests.post(url, json=data, timeout=10)
+        except Exception as _e:
+            print(f"[TG] send error: {_e}")
+
+    full_msg = "🟠 MEXC BOUNCE\n" + msg
+    def _worker() -> None:
+        try:
+            _send(full_msg, "HTML")
+        except Exception:
+            try:
+                import re
+                plain = re.sub(r"<[^>]+>", "", full_msg)
+                _send(plain, "")
+            except Exception as _e2:
+                print(f"[TG] fallback error: {_e2}")
+    threading.Thread(target=_worker, daemon=True).start()
+
+
+def send_telegram(alert: dict) -> None:
+    """Build and send the HTML signal message for a new alert."""
+    sym       = alert.get("symbol", "")
+    direction = alert.get("direction", "LONG")
+    tier      = alert.get("tier", "REGULAR")
+    score     = alert.get("score", 0)
+    trend     = alert.get("trend", "Neutral")
+    j15m      = float(alert.get("j15m", 0) or 0)
+    j1h       = float(alert.get("j1h",  0) or 0)
+    adx       = float(alert.get("adx1h", 0) or 0)
+    bid_pct   = float(alert.get("bid_pct", 0) or 0)
+    ask_pct   = float(alert.get("ask_pct", 0) or 0)
+    entry     = float(alert.get("entry_price", 0) or 0)
+    sl        = float(alert.get("sl_price", 0) or 0)
+    tp1       = float(alert.get("tp1_price", 0) or 0)
+    tp2       = float(alert.get("tp2_price", 0) or 0)
+    leverage  = int(alert.get("leverage", 5) or 5)
+    margin    = float(alert.get("margin", MARGIN_PER_TRADE) or MARGIN_PER_TRADE)
+    session   = alert.get("session", "—") or "—"
+
+    tier_map    = {"HIGH_PROB": "✦ HIGH PROB", "STRONG": "◆ STRONG"}
+    tier_label  = tier_map.get(tier, "● REGULAR")
+    trend_emoji = _TREND_EMOJI.get(trend, "➡️")
+
+    sess_lo = session.lower()
+    if "asia" in sess_lo:                          session_emoji = "🌏"
+    elif "london" in sess_lo:                      session_emoji = "🌍"
+    elif "ny" in sess_lo or "new york" in sess_lo: session_emoji = "🌎"
+    else:                                          session_emoji = "🌑"
+
+    is_long  = direction == "LONG"
+    size     = (margin * leverage / entry) if entry else 0
+    tp1_pnl  = ((tp1 - entry) * size) if is_long else ((entry - tp1) * size)
+    tp2_pnl  = ((tp2 - entry) * size) if is_long else ((entry - tp2) * size)
+    sl_pnl   = ((sl  - entry) * size) if is_long else ((entry - sl)  * size)
+    sl_dist  = abs(entry - sl)
+    d_risk   = margin * leverage * (sl_dist / entry) if entry else margin
+    rr       = round(abs(tp1_pnl) / d_risk, 2) if d_risk else 0
+    liq      = (entry - margin / size) if (is_long and size) else \
+               (entry + margin / size) if size else 0
+    adx_lbl  = "Trending" if adx >= 25 else "Ranging"
+    dir_lbl  = "Open Long" if is_long else "Open Short"
+    ts       = datetime.now(_EDT).strftime("%Y-%m-%d %H:%M EDT")
+
+    parts = [
+        f"<b>{tier_label} {direction} — {sym}</b>",
+        f"Score: {score}/4",
+        f"Trend: {trend_emoji} {trend}",
+        f"J15M: {j15m:.1f}",
+        f"J1H: {j1h:.1f}",
+        "📊 ADX: " + f"{adx:.1f} — {adx_lbl}",
+        f"Depth: B{bid_pct:.0f}% / S{ask_pct:.0f}%",
+        f"Session: {session_emoji} {session} +0",
+        "━━━ ORDER SETUP ━━━",
+        f"Direction:   {dir_lbl}",
+        f"Entry:       {_fmt_p(entry)}",
+        f"Cost:        {margin:.0f} USDT",
+        f"Leverage:    {leverage}x (Isolated)",
+        f"TP1:         {_fmt_p(tp1)}",
+        f"TP2:         {_fmt_p(tp2)}",
+        f"SL:          {_fmt_p(sl)}",
+        "━━━ RISK SUMMARY ━━━",
+        "Est. Profit TP1: $" + f"{tp1_pnl:.2f}" + " net",
+        "Est. Profit TP2: $" + f"{tp2_pnl:.2f}" + " net",
+        "Max Loss:        $" + f"{sl_pnl:.2f}"  + " net",
+        f"R:R:             1:{rr}",
+        f"Liq Price:       ~{_fmt_p(liq)}",
+        "⏱ " + ts,
+    ]
+    _tg_post("\n".join(parts))
+
+
+def send_reminder(alert: dict, cancel_event: threading.Event) -> None:
+    """Sleep 30 min (in chunks), then send a reminder unless cancelled."""
+    sym       = alert.get("symbol", "")
+    direction = alert.get("direction", "LONG")
+    sl        = float(alert.get("sl_price", 0) or 0)
+    tp1       = float(alert.get("tp1_price", 0) or 0)
+    tp2       = float(alert.get("tp2_price", 0) or 0)
+    fired_at  = alert.get("fired_at", int(time.time()))
+    orig_time = datetime.fromtimestamp(fired_at, tz=_EDT).strftime("%H:%M EDT")
+
+    elapsed = 0
+    while elapsed < 1800 and not cancel_event.is_set():
+        time.sleep(10)
+        elapsed += 10
+
+    if cancel_event.is_set():
+        return
+
+    live_price = app_state.prices.get(sym, 0)
+    key        = f"{sym}{direction}"
+
+    if key in app_state.open_trades:
+        status = "✅ ACTIVE"
+    else:
+        closed = next(
+            (e for e in reversed(app_state.trade_log)
+             if e["symbol"] == sym and e["direction"] == direction), None
+        )
+        if closed:
+            reason = closed.get("exit_reason", "")
+            if reason == "SL":
+                status = "🔴 SL Breached"
+            elif reason in ("TP2", "HC_PARTIAL_1.5R"):
+                status = "✅ TP2 Reached"
+            else:
+                status = "Closed (" + reason + ")"
+        else:
+            status = "✅ ACTIVE"
+
+    ts  = datetime.now(_EDT).strftime("%Y-%m-%d %H:%M EDT")
+    msg = (
+        "⏰ REMINDER — " + sym + " " + direction + "\n"
+        "Alert sent 30 min ago at " + orig_time + "\n"
+        "Current price: " + _fmt_p(live_price) + "\n"
+        "SL: " + _fmt_p(sl) + " | TP1: " + _fmt_p(tp1) + " | TP2: " + _fmt_p(tp2) + "\n"
+        "Status: " + status + "\n"
+        "⏱ " + ts
+    )
+    _tg_post(msg)
+
+
+# ── Background loops ──────────────────────────────────────────────────────────
+
+async def _scan_loop():
+    await asyncio.sleep(3)
     while True:
         try:
-            await asyncio.sleep(PRICE_INTERVAL_SECONDS)
-            _ensure_daily_reset()
-            trades_to_check = list(state.open_trades)
-            for trade in trades_to_check:
-                sym   = trade["symbol"]
-                price = state.prices.get(sym)
-                if not price:
-                    continue
-                d      = trade["direction"]
-                sl     = trade["sl_price"]
-                tp1    = trade["tp1_price"]
-                tp2    = trade["tp2_price"]
-                tp1hit = trade.get("tp1_hit", False)
+            new_alerts = await run_full_scan(mexc_client, market_health=app_state.market_health)
+            app_state.last_scan_at = int(time.time())
+            app_state.pair_states  = await scan_pair_state(mexc_client)
+            app_state.market_health = compute_market_health(
+                app_state.pair_states, list(app_state.trade_log)
+            )
 
-                if d == "LONG":
-                    if not tp1hit and price >= tp1:
-                        _partial_close_tp1(trade, price)
-                    elif tp1hit and price >= tp2:
-                        _close_trade(trade, price, "TP2")
-                    elif price <= sl:
-                        _close_trade(trade, price, "SL")
-                else:  # SHORT
-                    if not tp1hit and price <= tp1:
-                        _partial_close_tp1(trade, price)
-                    elif tp1hit and price <= tp2:
-                        _close_trade(trade, price, "TP2")
-                    elif price >= sl:
-                        _close_trade(trade, price, "SL")
-        except asyncio.CancelledError:
-            raise
+            # Capture per-pair scan snapshots for the live overlay
+            for _ps in app_state.pair_states:
+                _sym = _ps.get("symbol")
+                if _sym:
+                    _snap = {
+                        "n":           get_scan_count(),
+                        "ts":          int(time.time()),
+                        "j15m":        _ps.get("j15m"),
+                        "bid_pct":     _ps.get("bid_pct"),
+                        "ask_pct":     _ps.get("ask_pct"),
+                        "rsi15m":      _ps.get("rsi15m"),
+                        "adx1h":       _ps.get("adx1h"),
+                        "score_long":  _ps.get("long_score"),
+                        "score_short": _ps.get("short_score"),
+                    }
+                    _hist = app_state.scan_snapshots.get(_sym, [])
+                    app_state.scan_snapshots[_sym] = ([_snap] + _hist)[:3]
+
+            for alert in new_alerts:
+                sym, dir_ = alert["symbol"], alert["direction"]
+
+                # Issue 2 fix: set cooldown immediately when alert fires so scanner
+                # stops re-confirming the same signal on subsequent scans
+                set_close_cooldown(sym, dir_)
+                _save_state()
+
+                # Update alerts panel
+                existing = next(
+                    (a for a in app_state.alerts
+                     if a["symbol"] == sym and a["direction"] == dir_), None
+                )
+                if existing:
+                    app_state.alerts.remove(existing)
+                app_state.alerts.insert(0, alert)
+
+                # Telegram alert + 30-min reminder
+                if TELEGRAM_ENABLED:
+                    threading.Thread(target=lambda a=alert: send_telegram(a), daemon=True).start()
+                    ev = threading.Event()
+                    if sym in _pending_reminders:
+                        _pending_reminders[sym].set()
+                    _pending_reminders[sym] = ev
+                    threading.Thread(target=lambda a=alert, e=ev: send_reminder(a, e), daemon=True).start()
+
+                # Auto-entry gate: blocked when live and LIVE_MANUAL_ENTRY_ONLY is True
+                if not PAPER_MODE and LIVE_MANUAL_ENTRY_ONLY:
+                    print(
+                        f"[SIGNAL] {sym} {dir_} tier={alert.get('tier')} "
+                        f"lev={alert.get('leverage')}x entry={alert.get('entry_price')} "
+                        f"sl={alert.get('sl_price')} tp1={alert.get('tp1_price')} "
+                        f"— live manual entry required via overlay. "
+                        f"Do not open position automatically."
+                    )
+                else:
+                    if not PAPER_MODE:
+                        print(
+                            "[WARNING] LIVE AUTO-ENTRY ACTIVE — "
+                            "LIVE_MANUAL_ENTRY_ONLY is disabled."
+                        )
+                    _margin = alert.get("margin", MARGIN_PER_TRADE)
+                    trade, err = await _do_open_trade(
+                        sym, dir_,
+                        _margin, alert["leverage"],
+                        alert_data=alert,
+                        exchange="MEXC",
+                    )
+                    if trade:
+                        print(
+                            f"[AUTO TRADE] {sym} {dir_} opened "
+                            f"tier={alert.get('tier')} lev={alert.get('leverage')}x "
+                            f"entry={trade.get('entry_price')} sl={trade.get('sl_price')} "
+                            f"margin=${_margin:.0f}"
+                        )
+                    elif err:
+                        print(f"[AUTO TRADE] {sym} {dir_} skipped: {err}")
         except Exception as e:
-            log.error(f"[EXIT] monitor error: {e}", exc_info=True)
+            print(f"[SCAN LOOP] error: {e}")
+        await asyncio.sleep(SCAN_INTERVAL_SECONDS)
 
-
-# ── Price loop ─────────────────────────────────────────────────────────────────
 
 async def _price_loop():
     while True:
         try:
-            tasks = {sym: mexc.fetch_price(sym) for sym in PAIRS}
-            results = await asyncio.gather(*tasks.values(), return_exceptions=True)
-            for sym, result in zip(tasks.keys(), results):
-                if isinstance(result, float) and result > 0:
-                    state.prices[sym] = result
-                    # Update price in pair_data cache
-                    if sym in state.pair_data:
-                        state.pair_data[sym]["price"] = result
+            for sym in PAIRS:
+                try:
+                    price = await mexc_client.get_price(sym)
+                    if price:
+                        app_state.prices[sym] = price
+                except Exception:
+                    pass
+
+
+            # Auto-reset daily PnL at UTC midnight
+            global daily_pnl, trading_halted_today, _last_midnight_day
+            today = datetime.now(timezone.utc).day
+            if today != _last_midnight_day:
+                daily_pnl            = 0.0
+                trading_halted_today = False
+                _last_midnight_day   = today
+                print("[DAILY RESET] midnight UTC — daily_pnl reset")
+
         except Exception as e:
-            log.error(f"[PRICE] loop error: {e}")
+            print(f"[PRICE LOOP] error: {e}")
         await asyncio.sleep(PRICE_INTERVAL_SECONDS)
 
 
-# ── Scan loop ──────────────────────────────────────────────────────────────────
+# ── Exit monitor helpers ───────────────────────────────────────────────────────
 
-async def _scan_loop():
+def _compute_r(pnl: float, trade: dict) -> float:
+    entry       = trade.get("entry_price") or 0
+    sl_dist     = trade.get("sl_dist") or 0
+    lev         = trade.get("leverage", 1)
+    margin      = trade.get("margin", MARGIN_PER_TRADE)
+    dollar_risk = margin * lev * (sl_dist / entry) if entry else 0
+    return round(pnl / dollar_risk, 2) if dollar_risk else 0.0
+
+
+def _do_hc_partial_close(key: str, trade: dict, exit_price: float):
+    """HC Score-10: close 1/3 at 1.5R, move SL to entry (breakeven)."""
+    sym, direction = trade["symbol"], trade["direction"]
+    full_size = trade.get("remaining_size", trade["size"])
+    close_sz  = full_size / 3
+    entry     = trade["entry_price"]
+    pnl       = (exit_price - entry) * close_sz if direction == "LONG" \
+                else (entry - exit_price) * close_sz
+    r         = _compute_r(pnl, trade)
+    _append_trade_log(trade, exit_price, "HC_PARTIAL_1.5R", pnl, r)
+    _update_daily_pnl(pnl)
+    trade["remaining_size"] = full_size - close_sz
+    trade["partial_hit"]    = True
+    trade["sl_price"]       = entry  # move SL to breakeven
+    old_margin              = trade.get("margin", MARGIN_PER_TRADE)
+    trade["margin"]         = old_margin * 2 / 3
+    app_state.open_trades[key]    = trade
+    app_state.margin_deployed     = max(0.0, app_state.margin_deployed - old_margin / 3)
+    print(f"[HC PARTIAL] {sym} {direction} 1/3 closed at {exit_price:.6f} "
+          f"pnl=${pnl:.2f} r={r:+.2f}R — SL moved to breakeven {entry:.6f}")
+    _save_state()
+
+
+def _do_close_trade(key: str, trade: dict, exit_price: float, reason: str):
+    """Synchronous internal close — no exchange call, price already known."""
+    sym       = trade["symbol"]
+    direction = trade["direction"]
+    remaining = trade.get("remaining_size", trade["size"])
+    entry     = trade["entry_price"]
+
+    pnl = (exit_price - entry) * remaining if direction == "LONG" \
+          else (entry - exit_price) * remaining
+    r   = _compute_r(pnl, trade)
+
+    _append_trade_log(trade, exit_price, reason, pnl, r)
+    _update_daily_pnl(pnl)
+    _on_trade_close(reason)
+
+    app_state.margin_deployed = max(0.0, app_state.margin_deployed - trade["margin"])
+    if key in app_state.open_trades:
+        del app_state.open_trades[key]
+    _retire_alert(sym, direction)
+    set_close_cooldown(sym, direction)
+
+    print(f"[EXIT] {sym} {direction} closed at {exit_price} reason={reason} "
+          f"pnl=${pnl:.2f} r={r:+.2f}R")
+    if TELEGRAM_ENABLED:
+        def _exit_tg(r=reason, s=sym, d=direction, ep=exit_price, p=pnl):
+            if r == "SL":
+                _tg_post("🔴 EXIT — " + s + " " + d + " — SL hit at " + _fmt_p(ep) + ". Final P&L: $" + f"{p:.2f}")
+            elif r == "TP2":
+                _tg_post("✅ TP2 HIT — " + s + " " + d + " — full close at " + _fmt_p(ep) + ". Final P&L: $" + f"{p:.2f}")
+            else:
+                _tg_post("📋 EXIT (" + r + ") — " + s + " " + d + " — closed at " + _fmt_p(ep) + ". P&L: $" + f"{p:.2f}")
+        threading.Thread(target=_exit_tg, daemon=True).start()
+    if PAPER_MODE:
+        asyncio.create_task(_update_paper_trade_close(trade, exit_price, reason, pnl))
+    _save_state()
+
+
+def _do_partial_close_tp1(key: str, trade: dict, exit_price: float):
+    """Close half the position at TP1, keep remainder open watching for TP2."""
+    sym       = trade["symbol"]
+    direction = trade["direction"]
+    full_size = trade.get("remaining_size", trade["size"])
+    half_size = full_size / 2
+    entry     = trade["entry_price"]
+
+    pnl = (exit_price - entry) * half_size if direction == "LONG" \
+          else (entry - exit_price) * half_size
+    r   = _compute_r(pnl, trade)
+
+    # Log the TP1 partial close BEFORE modifying trade dict (so size/metadata is correct)
+    _append_trade_log(trade, exit_price, "TP1", pnl, r)
+    _update_daily_pnl(pnl)
+
+    # Update trade in-place — keep it open for TP2 watch
+    trade["remaining_size"] = half_size
+    trade["tp1_hit"]        = True
+    trade["extreme_price"]  = exit_price
+    # Halve the deployed margin to reflect the partial close
+    old_margin = trade.get("margin", MARGIN_PER_TRADE)
+    trade["margin"] = old_margin / 2
+    app_state.open_trades[key]     = trade
+    app_state.margin_deployed      = max(0.0, app_state.margin_deployed - old_margin / 2)
+
+    print(f"[EXIT] {sym} {direction} TP1 partial close at {exit_price} "
+          f"half_pnl=${pnl:.2f} r={r:+.2f}R — remainder open watching TP2")
+    if TELEGRAM_ENABLED:
+        def _tp1_tg(s=sym, d=direction, ep=exit_price, p=pnl):
+            _tg_post("✅ TP1 HIT — " + s + " " + d + " — partial close at " + _fmt_p(ep) + ". P&L so far: $" + f"{p:.2f}")
+        threading.Thread(target=_tp1_tg, daemon=True).start()
+    _save_state()
+
+
+# ── Exit monitor loop ──────────────────────────────────────────────────────────
+
+async def _exit_monitor_loop():
+    """Runs every PRICE_INTERVAL_SECONDS. Checks every open trade against SL/TP."""
     while True:
         try:
-            _ensure_daily_reset()
+            for key, trade in list(app_state.open_trades.items()):
+                sym       = trade["symbol"]
+                direction = trade["direction"]
+                sl_price  = trade.get("sl_price")
+                tp1_price = trade.get("tp1_price")
+                tp2_price = trade.get("tp2_price")
+                current   = app_state.prices.get(sym)
+                tp1_hit   = trade.get("tp1_hit", False)
+                is_short  = direction == "SHORT"
 
-            # Safety checks
-            if state.circuit_breaker:
-                log.warning("[SCAN] Circuit breaker active — skipping")
-                await asyncio.sleep(SCAN_INTERVAL_SECONDS)
-                continue
-            if state.daily_pnl <= DAILY_LOSS_LIMIT:
-                log.warning(f"[SCAN] Daily loss limit hit ({state.daily_pnl:.2f}) — halting")
-                await asyncio.sleep(SCAN_INTERVAL_SECONDS)
-                continue
-            if state.deployed_margin >= MARGIN_HARD_CAP:
-                log.warning(f"[SCAN] Margin cap reached ({state.deployed_margin:.0f}) — skipping")
-                await asyncio.sleep(SCAN_INTERVAL_SECONDS)
-                continue
-
-            alerts = await sc.run_full_scan(mexc)
-            state.scan_count = sc.get_scan_count()
-            state.last_scan_ts = time.time()
-
-            # Update market health
-            pair_states = list(state.pair_data.values())
-            state.market_health = sc.compute_market_health(pair_states, state.trade_log[:50])
-
-            for alert in alerts:
-                sym = alert["symbol"]
-                d   = alert["direction"]
-
-                # Margin cap check
-                if state.deployed_margin + MARGIN_PER_TRADE > MARGIN_HARD_CAP:
-                    log.warning(f"[SCAN] Margin cap would be exceeded — skipping {sym} {d}")
+                if current is None or not sl_price:
+                    print(f"[EXIT CHECK] {sym} {direction} skipped — "
+                          f"no price ({current}) or no sl ({sl_price})")
                     continue
 
-                state.alerts.insert(0, {**alert, "ts": datetime.now(timezone.utc).isoformat()})
+                # Track extreme price (lowest for SHORT, highest for LONG)
+                ep = trade.get("extreme_price") or current
+                trade["extreme_price"] = min(ep, current) if is_short else max(ep, current)
 
-                await send_alert_telegram(alert)
+                # ── SL breach ──────────────────────────────────────────────────
+                # SHORT: SL triggers when price RISES above sl_price
+                # LONG : SL triggers when price FALLS below sl_price
+                sl_breached = (is_short and current >= sl_price) or \
+                              (not is_short and current <= sl_price)
 
-                if state.paper_mode:
-                    trade = _open_paper_trade(alert)
-                    log.info(f"[PAPER] Opened {sym} {d} id={trade['id']}")
+                if sl_breached:
+                    print(f"[EXIT CHECK] {sym} {direction} price={current} "
+                          f"sl={sl_price} tp1={tp1_price} → SL BREACHED → closing")
+                    _do_close_trade(key, trade, current, "SL")
+                    continue
 
-            # Persist state every scan
-            _save_state(state.serialise())
+                # ── HC early partial close at 1.5R → SL to breakeven ────────────
+                if (trade.get("is_score10") and not trade.get("partial_hit")
+                        and trade.get("partial_price")):
+                    _pp     = trade["partial_price"]
+                    _pp_hit = (is_short and current <= _pp) or (not is_short and current >= _pp)
+                    if _pp_hit:
+                        _do_hc_partial_close(key, trade, current)
+                        continue
 
-        except asyncio.CancelledError:
-            raise
+                # ── TP1 (always checked first — partial close, half position) ────
+                if not tp1_hit and tp1_price:
+                    tp1_reached = (is_short and current <= tp1_price) or \
+                                  (not is_short and current >= tp1_price)
+                    print(f"[EXIT CHECK] {sym} {direction} price={current} "
+                          f"tp1={tp1_price} tp1_hit={tp1_hit} → "
+                          f"{'TP1 TRIGGERED → partial close' if tp1_reached else 'watching tp1'}")
+                    if tp1_reached:
+                        _do_partial_close_tp1(key, trade, current)
+                        continue
+
+                # ── TP2 (only after tp1_hit=True — closes remainder) ──────────
+                if tp1_hit and tp2_price:
+                    tp2_reached = (is_short and current <= tp2_price) or \
+                                  (not is_short and current >= tp2_price)
+                    print(f"[EXIT CHECK] {sym} {direction} price={current} "
+                          f"tp2={tp2_price} tp1_hit={tp1_hit} → "
+                          f"{'TP2 TRIGGERED → full close remainder' if tp2_reached else 'watching tp2'}")
+                    if tp2_reached:
+                        _do_close_trade(key, trade, current, "TP2")
+                        continue
+
+                # HC trailing SL after tp1_hit: lock 1.5R minimum profit
+                if trade.get("is_score10") and tp1_hit:
+                    _sl_d = trade.get("sl_dist") or 0
+                    if _sl_d > 0:
+                        _ent   = trade["entry_price"]
+                        _lock  = (_ent + 1.5 * _sl_d if not is_short else _ent - 1.5 * _sl_d)
+                        _ep    = trade.get("extreme_price") or current
+                        _trail = (_ep - 2.0 * _sl_d if not is_short else _ep + 2.0 * _sl_d)
+                        _nsl   = (max(_lock, _trail) if not is_short else min(_lock, _trail))
+                        if sl_price and ((not is_short and _nsl > sl_price) or
+                                        (is_short and _nsl < sl_price)):
+                            trade["sl_price"] = round(_nsl, 6)
+                            app_state.open_trades[key]["sl_price"] = round(_nsl, 6)
+
+                # No exit this cycle
+                print(f"[EXIT CHECK] {sym} {direction} price={current} "
+                      f"sl={sl_price} tp1={tp1_price} tp2={tp2_price} → no exit")
+
         except Exception as e:
-            log.error(f"[SCAN] loop error: {e}", exc_info=True)
+            print(f"[EXIT MONITOR] error: {e}")
 
-        await asyncio.sleep(SCAN_INTERVAL_SECONDS)
-
-
-# ── Pair data update loop ──────────────────────────────────────────────────────
-
-async def _pair_data_loop():
-    """Update pair_data (indicators) after each scan — runs immediately then every SCAN_INTERVAL_SECONDS."""
-    while True:
-        try:
-            for sym in PAIRS:
-                await asyncio.sleep(0.3)
-                fast = await sc.scan_pair_fast(mexc, sym)
-                if fast.get("price"):
-                    state.pair_data[sym] = fast
-                    if fast["price"]:
-                        state.prices[sym] = fast["price"]
-        except asyncio.CancelledError:
-            raise
-        except Exception as e:
-            log.error(f"[PAIR_DATA] loop error: {e}")
-        await asyncio.sleep(SCAN_INTERVAL_SECONDS)
+        await asyncio.sleep(PRICE_INTERVAL_SECONDS)
 
 
-# ── Lifespan ───────────────────────────────────────────────────────────────────
+# ── Lifespan ──────────────────────────────────────────────────────────────────
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    log.info("[BOOT] MEXC Bounce Scanner starting...")
+    global mexc_client
+    mexc_client = MexcClient()
+    log_startup_config()
+    _load_state()
 
-    # Restore persisted state
-    saved = _load_state()
-    if saved:
-        state.open_trades  = saved.get("open_trades", [])
-        state.trade_log    = saved.get("trade_log", [])
-        state.daily_pnl    = saved.get("daily_pnl", 0.0)
-        state.scan_count   = saved.get("scan_count", 0)
-        log.info(f"[BOOT] Restored {len(state.open_trades)} open trades, {len(state.trade_log)} log entries")
+    # ── Mode log ──────────────────────────────────────────────────────────────
+    if PAPER_MODE:
+        print("[MODE] PAPER trading — auto-entry enabled")
+    elif LIVE_MANUAL_ENTRY_ONLY:
+        print("[MODE] LIVE trading — manual entry only via overlay. Auto-entry blocked.")
     else:
-        log.info("[BOOT] No persisted state — loading trade log from DB")
-        state.trade_log = _load_trade_log()
+        print("[MODE] LIVE trading — AUTO-ENTRY ACTIVE. All signals will open live positions automatically. Confirm this is intentional.")
 
-    # Start background tasks
-    tasks = [
-        asyncio.create_task(_price_loop(),      name="price_loop"),
-        asyncio.create_task(_scan_loop(),       name="scan_loop"),
-        asyncio.create_task(_exit_monitor_loop(), name="exit_monitor"),
-        asyncio.create_task(_pair_data_loop(),  name="pair_data"),
-    ]
-
+    scan_task  = asyncio.create_task(_scan_loop())
+    price_task = asyncio.create_task(_price_loop())
+    exit_task  = asyncio.create_task(_exit_monitor_loop())
     yield
-
-    for t in tasks:
-        t.cancel()
-    await asyncio.gather(*tasks, return_exceptions=True)
-    await mexc.close()
-    log.info("[SHUTDOWN] MEXC Bounce Scanner stopped")
+    scan_task.cancel()
+    price_task.cancel()
+    exit_task.cancel()
+    await mexc_client.close()
 
 
-# ── FastAPI app ────────────────────────────────────────────────────────────────
-
-app = FastAPI(title="MEXC Bounce Scanner", lifespan=lifespan)
+app = FastAPI(lifespan=lifespan)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
 
+# ── Routes ────────────────────────────────────────────────────────────────────
+
 @app.get("/", response_class=HTMLResponse)
-async def dashboard(request: Request):
-    return templates.TemplateResponse(request=request, name="dashboard.html")
-
-
-@app.get("/api/state")
-async def api_state():
-    return JSONResponse(state.serialise())
-
-
-@app.get("/api/pair/{symbol}")
-async def api_pair(symbol: str):
-    sym = symbol.upper()
-    if sym not in PAIRS and sym + "_USDT" in PAIRS:
-        sym = sym + "_USDT"
-    if sym not in PAIRS:
-        raise HTTPException(404, "Symbol not found")
-    cached = state.pair_data.get(sym)
-    if cached:
-        return JSONResponse({
-            **cached,
-            "open_trade":  next((t for t in state.open_trades if t["symbol"] == sym), None),
-            "cooldown_short": sc.get_cooldown_remaining(sym, "SHORT"),
-            "cooldown_long":  sc.get_cooldown_remaining(sym, "LONG"),
-        })
-    # Fall back to live fetch
-    fast = await sc.scan_pair_fast(mexc, sym)
-    return JSONResponse({
-        **fast,
-        "open_trade":  next((t for t in state.open_trades if t["symbol"] == sym), None),
-        "cooldown_short": sc.get_cooldown_remaining(sym, "SHORT"),
-        "cooldown_long":  sc.get_cooldown_remaining(sym, "LONG"),
+async def index(request: Request):
+    return templates.TemplateResponse(request, "dashboard.html", {
+        "paper_mode":    PAPER_MODE,
+        "scan_interval": SCAN_INTERVAL_SECONDS,
+        "margin_cap":    MARGIN_HARD_CAP,
     })
 
 
+@app.get("/api/state")
+async def get_state():
+    return app_state.serialise()
+
+
+@app.get("/api/account")
+async def get_account():
+    return {
+        "margin_deployed": round(app_state.margin_deployed, 2),
+        "cap":             MARGIN_HARD_CAP,
+        "paper_mode":      PAPER_MODE,
+        "slots_used":      app_state.slots_used,
+    }
+
+
+# ── Per-pair overlay endpoint ─────────────────────────────────────────────────
+
+@app.get("/api/pair/{symbol}")
+async def get_pair(symbol: str):
+    ps = next((p for p in app_state.pair_states if p.get("symbol") == symbol), None)
+    if ps is None:
+        raise HTTPException(status_code=404, detail="pair not found")
+
+    j15m    = ps.get("j15m",    50)
+    j1h     = ps.get("j1h",     50)
+    rsi15m  = ps.get("rsi15m",  50)
+    bid_pct = ps.get("bid_pct", 50)
+    ask_pct = ps.get("ask_pct", 50)
+    adx     = ps.get("adx1h",   0)
+    atr     = ps.get("atr15m",  0)
+    price   = app_state.prices.get(symbol, ps.get("price", 0))
+    chg     = app_state.price_changes.get(symbol)
+
+    gate_long  = [j15m < 20, j1h < 40, rsi15m < 35, bid_pct >= 55]
+    gate_short = [j15m > 80, j1h > 60, rsi15m > 65, ask_pct >= 55]
+    score_long  = sum(gate_long)
+    score_short = sum(gate_short)
+    confluence_long  = j15m < 20 and j1h < 40
+    confluence_short = j15m > 80 and j1h > 60
+
+    # Active alert for this symbol (first match)
+    alert = next((a for a in app_state.alerts if a.get("symbol") == symbol), None)
+
+    # Alert staleness
+    alert_state_val = None
+    alert_age_sec   = None
+    if alert:
+        fired_at      = alert.get("fired_at", int(time.time()))
+        alert_age_sec = int(time.time()) - fired_at
+        entry_p       = alert.get("entry_price", price) or price or 1
+        alert_j15m    = alert.get("j15m", j15m)
+        j_drift       = abs(j15m - alert_j15m)
+        p_drift       = abs(price - entry_p) / entry_p * 100 if entry_p else 0
+        if   alert_age_sec > 480 or j_drift > 30 or p_drift > 1.5:
+            alert_state_val = "STALE"
+        elif alert_age_sec > 180 or j_drift > 15 or p_drift > 0.5:
+            alert_state_val = "AGING"
+        else:
+            alert_state_val = "FRESH"
+
+    # Open trades for this symbol
+    in_trade_long  = None
+    in_trade_short = None
+    for k, t in app_state.open_trades.items():
+        if t.get("symbol") != symbol:
+            continue
+        cur   = app_state.prices.get(symbol, t["entry_price"])
+        entry = t["entry_price"]
+        dir_  = t["direction"]
+        size  = t.get("size",   0)
+        mg    = t.get("margin", 0)
+        lev   = t.get("leverage", 1)
+        sl_d  = t.get("sl_dist", 0) or 0
+        pnl   = (cur - entry) * size if dir_ == "LONG" else (entry - cur) * size
+        dr    = mg * lev * (sl_d / entry) if entry else 0
+        r_val = round(pnl / dr, 2) if dr else 0
+        out   = {**t,
+                 "current_price":  cur,
+                 "unrealized_pnl": round(pnl, 2),
+                 "r":              r_val,
+                 "elapsed_s":      int(time.time()) - t.get("opened_at", int(time.time()))}
+        if dir_ == "LONG":
+            in_trade_long  = out
+        else:
+            in_trade_short = out
+
+    # Last 5 closed trades for this symbol
+    recent_alerts = [row for row in reversed(app_state.trade_log)
+                     if row.get("symbol") == symbol][:5]
+
+    return {
+        "symbol":              symbol,
+        "price":               price,
+        "change_24h":          chg,
+        "j15m":                j15m,
+        "j1h":                 j1h,
+        "rsi15m":              rsi15m,
+        "adx":                 adx,
+        "atr":                 atr,
+        "bid_pct":             bid_pct,
+        "ask_pct":             ask_pct,
+        "gate_long":           gate_long,
+        "gate_short":          gate_short,
+        "score_long":          score_long,
+        "score_short":         score_short,
+        "alert":               alert,
+        "alert_state":         alert_state_val,
+        "alert_age_seconds":   alert_age_sec,
+        "in_trade_long":       in_trade_long,
+        "in_trade_short":      in_trade_short,
+        "last_scan_summaries": app_state.scan_snapshots.get(symbol, []),
+        "recent_alerts":       recent_alerts,
+        "confluence_long":     confluence_long,
+        "confluence_short":    confluence_short,
+        "trend":               ps.get("trend"),
+    }
+
+
+# ── Trade open ────────────────────────────────────────────────────────────────
+
+class OpenTradeRequest(BaseModel):
+    symbol:      str
+    direction:   str
+    exchange:    str = "MEXC"
+    margin_usdc: float = MARGIN_PER_TRADE
+    leverage:    int   = 5
+    sl_price:    Optional[float] = None
+
+
+@app.post("/api/trade/open")
+async def open_trade(req: OpenTradeRequest):
+    # Manual entry via overlay — always permitted regardless of LIVE_MANUAL_ENTRY_ONLY setting.
+    alert_data = None
+    for a in app_state.alerts:
+        if a["symbol"] == req.symbol and a["direction"] == req.direction:
+            alert_data = a
+            break
+
+    if req.sl_price and alert_data:
+        alert_data = {**alert_data, "sl_price": req.sl_price}
+    elif req.sl_price:
+        alert_data = {"sl_price": req.sl_price}
+
+    trade, err = await _do_open_trade(
+        req.symbol, req.direction,
+        req.margin_usdc, req.leverage,
+        alert_data, req.exchange,
+    )
+    if err:
+        code = 400 if err in ("cap_reached", "already_open", "circuit_breaker", "daily_limit") else 500
+        raise HTTPException(status_code=code, detail=err)
+    return {"status": "ok", "trade": trade}
+
+
+# ── Trade close ───────────────────────────────────────────────────────────────
+
+class CloseTradeRequest(BaseModel):
+    symbol:    str
+    direction: str
+
+
+@app.post("/api/trade/close")
+async def close_trade(req: CloseTradeRequest):
+    key   = app_state.trade_key(req.symbol, req.direction)
+    trade = app_state.open_trades.get(key)
+    if not trade:
+        raise HTTPException(status_code=404, detail=f"No open trade for {key}")
+
+    exchange = trade.get("exchange", "MEXC")
+    _client  = mexc_client
+    result   = await _client.close_position(req.symbol, req.direction, trade["size"])
+    if result.get("status") != "ok":
+        raise HTTPException(status_code=500, detail=result.get("msg", "close failed"))
+
+    close_price = result.get("close_price", app_state.prices.get(req.symbol, trade["entry_price"]))
+    entry       = trade["entry_price"]
+    remaining   = trade.get("remaining_size", trade["size"])
+
+    pnl = (close_price - entry) * remaining if req.direction == "LONG" else (entry - close_price) * remaining
+
+    sl_dist = trade.get("sl_dist") or 0
+    lev     = trade.get("leverage", 1)
+    margin  = trade.get("margin", MARGIN_PER_TRADE)
+    dollar_risk = margin * lev * (sl_dist / entry) if entry else 0
+    r = round(pnl / dollar_risk, 2) if dollar_risk else 0.0
+
+    _append_trade_log(trade, close_price, "MANUAL", pnl, r)
+    _update_daily_pnl(pnl)
+    _on_trade_close("MANUAL")
+
+    app_state.margin_deployed = max(0.0, app_state.margin_deployed - trade["margin"])
+    closed = {**trade, "close_price": close_price, "final_pnl": round(pnl, 2)}
+    del app_state.open_trades[key]
+    _retire_alert(req.symbol, req.direction)
+    set_close_cooldown(req.symbol, req.direction)
+
+    _save_state()
+    print(f"[TRADE CLOSE] {req.symbol} {req.direction} MANUAL pnl=${pnl:.2f} r={r:+.2f}")
+    return {"status": "ok", "closed": closed}
+
+
+# ── Circuit breaker ───────────────────────────────────────────────────────────
+
+@app.post("/api/circuit-breaker/reset")
+async def reset_circuit_breaker():
+    global consecutive_losses, circuit_breaker_active
+    circuit_breaker_active = False
+    consecutive_losses     = 0
+    print("[CIRCUIT BREAKER RESET] manual reset")
+    return {"status": "ok", "circuit_breaker_active": False, "consecutive_losses": 0}
+
+
+# ── Daily reset ───────────────────────────────────────────────────────────────
+
+@app.post("/api/reset-day")
+async def reset_day():
+    global daily_pnl, trading_halted_today
+    daily_pnl            = 0.0
+    trading_halted_today = False
+    print("[DAILY RESET] manual reset")
+    return {"status": "ok"}
+
+
+# ── Trade log ─────────────────────────────────────────────────────────────────
+
 @app.get("/api/tradelog")
-async def api_tradelog():
-    all_trades = state.open_trades + state.trade_log
-    headers = ["id","symbol","direction","tier","leverage","margin","entry_price",
-               "exit_price","sl_price","tp1_price","tp2_price","status","close_reason",
-               "pnl","opened_at","closed_at","session","exchange"]
-    rows = [",".join(str(t.get(h, "")) for h in headers) for t in all_trades]
-    csv  = ",".join(headers) + "\n" + "\n".join(rows)
+async def get_tradelog():
+    return app_state.trade_log
+
+
+@app.get("/api/tradelog/csv")
+async def download_tradelog_csv():
+    fieldnames = [
+        "timestamp_opened", "timestamp_closed", "symbol", "direction",
+        "score", "adx1h", "tier", "entry_price", "sl_price",
+        "tp1_price", "tp2_price", "exit_price", "exit_reason",
+        "pnl_usd", "r_value", "duration_seconds", "exchange", "paper",
+    ]
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=fieldnames, extrasaction="ignore")
+    writer.writeheader()
+    for row in app_state.trade_log:
+        writer.writerow({k: row.get(k, "") for k in fieldnames})
+    today   = datetime.now(timezone.utc).strftime("%Y%m%d")
+    content = output.getvalue()
     return StreamingResponse(
-        iter([csv]),
+        iter([content]),
         media_type="text/csv",
-        headers={"Content-Disposition": "attachment; filename=mexc_trade_log.csv"},
+        headers={"Content-Disposition": f"attachment; filename=trade_log_{today}.csv"},
     )
 
 
-@app.post("/api/paper/open")
-async def api_paper_open(request: Request):
-    body = await request.json()
-    sym  = body.get("symbol", "").upper()
-    d    = body.get("direction", "").upper()
-    if sym not in PAIRS:
-        raise HTTPException(400, "Invalid symbol")
-    if d not in ("LONG", "SHORT"):
-        raise HTTPException(400, "direction must be LONG or SHORT")
-    cached = state.pair_data.get(sym) or {}
-    price  = state.prices.get(sym) or cached.get("price", 0)
-    if not price:
-        raise HTTPException(400, "No price available")
-    atr15m = cached.get("atr15m", price * 0.005)
-    from config import MIN_SL_PCT, MIN_SL_PCT_DEFAULT, ATR_SL_MULTIPLIER, TP1_R, TP2_R
-    from scanner import _leverage_tier
-    adx = cached.get("adx1h", 0)
-    sl_dist = max(atr15m * ATR_SL_MULTIPLIER, price * MIN_SL_PCT.get(sym, MIN_SL_PCT_DEFAULT))
-    tier, lev = _leverage_tier(adx)
-    if d == "SHORT":
-        sl_price  = round(price + sl_dist, 8)
-        tp1_price = round(price - sl_dist * TP1_R, 8)
-        tp2_price = round(price - sl_dist * TP2_R, 8)
-        be_price  = round(price - price * 0.001, 8)
-    else:
-        sl_price  = round(price - sl_dist, 8)
-        tp1_price = round(price + sl_dist * TP1_R, 8)
-        tp2_price = round(price + sl_dist * TP2_R, 8)
-        be_price  = round(price + price * 0.001, 8)
-    alert = {
-        "symbol": sym, "direction": d, "tier": tier, "leverage": lev,
-        "price": price, "sl_price": sl_price, "tp1_price": tp1_price,
-        "tp2_price": tp2_price, "be_price": be_price, "sl_dist": sl_dist,
-        "j15m": cached.get("j15m"), "j1h": cached.get("j1h"),
-        "rsi15m": cached.get("rsi15m"), "adx": adx,
-        "session": sc.get_session_name(),
-    }
-    trade = _open_paper_trade(alert)
-    return JSONResponse({"ok": True, "trade_id": trade["id"]})
+class DismissAlertRequest(BaseModel):
+    symbol:    str
+    direction: str
+
+@app.post("/api/alert/dismiss")
+async def dismiss_alert(req: DismissAlertRequest):
+    _retire_alert(req.symbol, req.direction)
+    return {"status": "ok"}
 
 
-@app.post("/api/paper/close")
-async def api_paper_close(request: Request):
-    body     = await request.json()
-    trade_id = body.get("trade_id")
-    sym      = body.get("symbol", "").upper()
-    force    = body.get("force", False)
-    trade    = None
-    if trade_id:
-        trade = next((t for t in state.open_trades if t["id"] == trade_id), None)
-    elif sym:
-        trade = next((t for t in state.open_trades if t["symbol"] == sym), None)
-    if not trade:
-        raise HTTPException(404, "Trade not found")
-    price = state.prices.get(trade["symbol"], trade["entry_price"])
-    reason = "FORCE_CLOSE" if force else "MANUAL_CLOSE"
-    _close_trade(trade, price, reason)
-    return JSONResponse({"ok": True})
+@app.delete("/api/alerts")
+async def clear_alerts_endpoint():
+    app_state.alerts.clear()
+    clear_all_scanner_state()
+    print("[CLEAR ALERTS] alerts cleared, consecutive-scan state reset")
+    return {"status": "ok"}
 
 
-@app.post("/api/settings")
-async def api_settings(request: Request):
-    body = await request.json()
-    if "paper_mode" in body:
-        state.paper_mode = bool(body["paper_mode"])
-    if "live_manual" in body:
-        state.live_manual = bool(body["live_manual"])
-    if body.get("reset_circuit_breaker"):
-        state.circuit_breaker = False
-        state.consecutive_losses = 0
-    return JSONResponse({"ok": True, "paper_mode": state.paper_mode, "live_manual": state.live_manual})
+@app.delete("/api/tradelog")
+async def clear_tradelog():
+    global consecutive_losses, circuit_breaker_active, daily_pnl, trading_halted_today
+
+    count = len(app_state.open_trades)
+    for key, trade in list(app_state.open_trades.items()):
+        sym   = trade["symbol"]
+        ep    = app_state.prices.get(sym, trade["entry_price"])
+        entry = trade["entry_price"]
+        rem   = trade.get("remaining_size", trade["size"])
+        pnl   = (ep - entry) * rem if trade["direction"] == "LONG" else (entry - ep) * rem
+        _append_trade_log(trade, ep, "FORCE_CLOSE", pnl, 0.0)
+        app_state.margin_deployed = max(0.0, app_state.margin_deployed - trade["margin"])
+
+    consecutive_losses     = 0
+    circuit_breaker_active = False
+    daily_pnl              = 0.0
+    trading_halted_today   = False
+    app_state.trade_log.clear()
+    app_state.open_trades.clear()
+    app_state.margin_deployed = 0.0
+    app_state.alerts.clear()
+    clear_all_scanner_state()
+
+    print(f"[CLEAR] {count} trades force closed, state reset")
+    return {"status": "ok", "trades_force_closed": count}

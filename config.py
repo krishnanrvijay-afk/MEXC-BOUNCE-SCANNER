@@ -1,54 +1,74 @@
 import os
 from datetime import datetime, timezone
 
-# MEXC perpetual futures — symbols use _USDT suffix
-PAIRS = [
-    "ZEC_USDT", "SOL_USDT", "BTC_USDT", "ETH_USDT", "XRP_USDT",
-    "DOGE_USDT", "SUI_USDT", "NEAR_USDT", "AVAX_USDT", "ARB_USDT",
-]
-
+# ── Supabase persistence ───────────────────────────────────────────────────────
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
 
+PAIRS = ["ZEC_USDT", "SOL_USDT", "BTC_USDT", "ETH_USDT", "XRP_USDT", "DOGE_USDT", "SUI_USDT", "NEAR_USDT", "AVAX_USDT", "ARB_USDT"]
+
 SCAN_INTERVAL_SECONDS  = 30
 PRICE_INTERVAL_SECONDS = 8
-PAPER_MODE             = os.environ.get("PAPER_MODE", "true").lower() == "true"
-LIVE_MANUAL_ENTRY_ONLY = os.environ.get("LIVE_MANUAL_ENTRY_ONLY", "true").lower() == "true"
+PAPER_MODE             = True
 
-# ── Four hard gates ────────────────────────────────────────────────────────────
+# ── Live trading safety ────────────────────────────────────────────────────────
+# When PAPER_MODE is False and LIVE_MANUAL_ENTRY_ONLY is True, the scanner will
+# never automatically open a live exchange position. Alerts fire and the overlay
+# updates normally but all live trade entry requires deliberate human action via
+# the symbol overlay Open HL or Open MEXC buttons. SL and TP exits continue to
+# execute automatically once a trade is open. This is the required mode for live
+# trading. Only set LIVE_MANUAL_ENTRY_ONLY to False if you explicitly want fully
+# automated live entry on every signal.
+LIVE_MANUAL_ENTRY_ONLY = True
+
 J15M_SHORT_GATE  = 80
 J15M_LONG_GATE   = 20
 J1H_SHORT_MIN    = 60
 J1H_LONG_MAX     = 40
+
 RSI15M_SHORT_MIN = 65
 RSI15M_LONG_MAX  = 35
-DEPTH_GATE_PCT   = 60   # ask%>=60 SHORT / bid%>=60 LONG
 
-# ── Signal tiers by ADX ────────────────────────────────────────────────────────
-LEVERAGE_HIGH = 10   # ADX >= 50 — HIGH PROB
-LEVERAGE_MID  = 7    # ADX 25-49 — STRONG
-LEVERAGE_LOW  = 5    # ADX < 25  — REGULAR
+DEPTH_GATE_PCT   = 60
 
 ATR_SL_MULTIPLIER = 1.0
+
 TP1_R = 1.0
 TP2_R = 1.5
 
-MARGIN_PER_TRADE = 2000.0
-MARGIN_HARD_CAP  = 25000.0
+LEVERAGE_HIGH = 10
+LEVERAGE_MID  = 7
+LEVERAGE_LOW  = 5
 
 COOLDOWN_SECONDS      = 1800
 CONSECUTIVE_LOSS_STOP = 3
 DAILY_LOSS_LIMIT      = -500.0
-ADX_FADE_MAX          = 60
 
-# ── Minimum SL distance per symbol ────────────────────────────────────────────
-MIN_SL_PCT: dict = {
-    "ZEC_USDT":  0.030,   # 3% minimum
+MARGIN_PER_TRADE = 2000.0
+MARGIN_HARD_CAP  = 25000.0
+
+ADX_FADE_MAX = 60
+
+SESSION_FILTER_ENABLED = False
+PLACE_EXCHANGE_SL      = True
+
+PAIR_ADX_OVERRIDES: dict = {
+    "SUI":  40,
+    "NEAR": 42,
+    "APT":  45,
+    "LINK": 38,
 }
-MIN_SL_PCT_DEFAULT = 0.0   # all others: ATR-only, no floor
 
-# ── Session definitions (EST = UTC-5) ─────────────────────────────────────────
-# EU: 03:00-08:00 EST  =  08:00-13:00 UTC
-# EU/US overlap: 08:00-12:00 EST  =  13:00-17:00 UTC
-# US: 12:00-17:00 EST  =  17:00-22:00 UTC
-# Asia: 17:00-03:00 EST  =  22:00-08:00 UTC
+MIN_SL_PCT: dict = {
+    "BTC":  0.008,
+    "ETH":  0.006,
+    "SOL":  0.008,
+    "XRP":  0.007,
+    "DOGE": 0.007,
+    "SUI":  0.010,
+    "NEAR": 0.010,
+    "LINK": 0.008,
+    "ARB":  0.012,
+    "ZEC":  0.030,
+}
+MIN_SL_PCT_DEFAULT = 0.010

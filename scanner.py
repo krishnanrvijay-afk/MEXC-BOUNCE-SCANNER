@@ -1,9 +1,3 @@
-"""
-scanner.py — MEXC Bounce Scanner signal logic.
-Two-consecutive-scan gate: ALL four hard gates must pass on TWO scans 30s apart.
-Score is binary 4/4 or 0 — no partial scoring.
-"""
-
 import asyncio
 import time
 import logging
@@ -16,19 +10,20 @@ from config import (
     TP1_R, TP2_R, LEVERAGE_HIGH, LEVERAGE_MID, LEVERAGE_LOW,
     COOLDOWN_SECONDS, ADX_FADE_MAX, PAPER_MODE, CONSECUTIVE_LOSS_STOP,
     MIN_SL_PCT, MIN_SL_PCT_DEFAULT, MARGIN_PER_TRADE,
+    PAIR_ADX_OVERRIDES,
 )
-from mexc_client import MexcClient, INTERVAL_15M, INTERVAL_1H
 
 log = logging.getLogger("scanner")
 
-# ── Module-level state ─────────────────────────────────────────────────────────
-_last_scores: dict[str, int]   = {}
-_cooldowns:   dict[str, float] = {}
+# ── Module-level state ────────────────────────────────────────────────────────
+
+_last_scores: dict[str, int]   = {}   # keyed "BTCSHORT" / "BTCLONG"
+_cooldowns:   dict[str, float] = {}   # keyed "BTCSHORT" / "BTCLONG" → expiry ts
 _scan_count:  int              = 0
-_pending:     dict[str, dict]  = {}   # key "SYMBOL_USDTLONG" — awaiting 2nd scan
+_pending:     dict[str, dict]  = {}   # first-scan confirmed, awaiting 2nd
 
 
-# ── Indicator helpers ──────────────────────────────────────────────────────────
+# ── Indicator helpers ─────────────────────────────────────────────────────────
 
 def _compute_kdj(candles: list[dict], period: int = 9) -> tuple[float, float, float]:
     if len(candles) < period:
@@ -40,8 +35,8 @@ def _compute_kdj(candles: list[dict], period: int = 9) -> tuple[float, float, fl
     for i in range(len(closes)):
         if i < period - 1:
             continue
-        h_n = max(highs[i - period + 1: i + 1])
-        l_n = min(lows[i  - period + 1: i + 1])
+        h_n = max(highs[i - period + 1 : i + 1])
+        l_n = min(lows[i  - period + 1 : i + 1])
         rsv = (closes[i] - l_n) / (h_n - l_n) * 100 if h_n != l_n else 50.0
         K   = 2 / 3 * K + 1 / 3 * rsv
         D   = 2 / 3 * D + 1 / 3 * K
@@ -88,7 +83,7 @@ def _compute_adx(candles: list[dict], period: int = 14) -> float:
         return 0.0
     plus_dms, minus_dms, trs = [], [], []
     for i in range(1, len(candles)):
-        up   = candles[i]["high"]   - candles[i - 1]["high"]
+        up   = candles[i]["high"]  - candles[i - 1]["high"]
         down = candles[i - 1]["low"] - candles[i]["low"]
         plus_dms.append(max(0.0, up)   if up   > down else 0.0)
         minus_dms.append(max(0.0, down) if down > up   else 0.0)
@@ -96,14 +91,14 @@ def _compute_adx(candles: list[dict], period: int = 14) -> float:
         trs.append(max(h - l, abs(h - pc), abs(l - pc)))
     if len(trs) < period:
         return 0.0
-    atr_s = sum(trs[:period])
-    pdm_s = sum(plus_dms[:period])
-    mdm_s = sum(minus_dms[:period])
-    dxs   = []
+    atr_s  = sum(trs[:period])
+    pdm_s  = sum(plus_dms[:period])
+    mdm_s  = sum(minus_dms[:period])
+    dxs    = []
     for i in range(period, len(trs)):
-        atr_s = atr_s - atr_s / period + trs[i]
-        pdm_s = pdm_s - pdm_s / period + plus_dms[i]
-        mdm_s = mdm_s - mdm_s / period + minus_dms[i]
+        atr_s  = atr_s  - atr_s  / period + trs[i]
+        pdm_s  = pdm_s  - pdm_s  / period + plus_dms[i]
+        mdm_s  = mdm_s  - mdm_s  / period + minus_dms[i]
         if atr_s == 0:
             continue
         pdi = pdm_s / atr_s * 100
@@ -124,8 +119,9 @@ def _compute_ma(candles: list[dict], period: int) -> Optional[float]:
     return sum(closes[-period:]) / period
 
 
-def _trend_from_ma(price: float, candles_15m: list, candles_1h: list, adx_1h: float = 0.0) -> str:
-    def _vote(candles, p):
+def _trend_from_ma(price: float, candles_5m: list, candles_15m: list, candles_1h: list, adx_1h: float = 0.0) -> str:
+    """1H-anchored trend: 1H is primary anchor; 15M/5M add conviction but cannot override."""
+    def _vote(candles: list, p: float) -> str:
         ma5  = _compute_ma(candles, 5)
         ma10 = _compute_ma(candles, 10)
         ma30 = _compute_ma(candles, 30)
@@ -135,19 +131,24 @@ def _trend_from_ma(price: float, candles_15m: list, candles_1h: list, adx_1h: fl
             if ma5 < ma10 < ma30 and p < ma10:
                 return "BEAR"
         return "NEUTRAL"
+    v5m  = _vote(candles_5m,  price)
     v15m = _vote(candles_15m, price)
     v1h  = _vote(candles_1h,  price)
-    if v1h == "BEAR" and v15m == "BEAR" and adx_1h >= 25:
+    if v1h == "BEAR" and v15m == "BEAR" and v5m == "BEAR" and adx_1h >= 25:
+        return "Strong Bear"
+    if v1h == "BEAR" and v15m == "BEAR":
         return "Strong Bear"
     if v1h == "BEAR":
         return "Bearish"
-    if v1h == "BULL" and v15m == "BULL" and adx_1h >= 25:
+    if v1h == "BULL" and v15m == "BULL" and v5m == "BULL" and adx_1h >= 25:
+        return "Strong Bull"
+    if v1h == "BULL" and v15m == "BULL":
         return "Strong Bull"
     if v1h == "BULL":
         return "Bullish"
-    if v15m == "BEAR":
+    if v15m == "BEAR" and v5m == "BEAR":
         return "Bearish"
-    if v15m == "BULL":
+    if v15m == "BULL" and v5m == "BULL":
         return "Bullish"
     return "Neutral"
 
@@ -163,35 +164,49 @@ def _depth_pcts(book: dict) -> tuple[float, float]:
     return round(bid_vol / total * 100, 1), round(ask_vol / total * 100, 1)
 
 
+# ── Scoring ───────────────────────────────────────────────────────────────────
+
 def _leverage_tier(adx: float) -> tuple[str, int]:
     if adx >= 50:
         return "HIGH_PROB", LEVERAGE_HIGH
     if adx >= 25:
-        return "STRONG",    LEVERAGE_MID
-    return "REGULAR",       LEVERAGE_LOW
+        return "STRONG", LEVERAGE_MID
+    return "REGULAR", LEVERAGE_LOW
 
 
-# ── Session helpers ────────────────────────────────────────────────────────────
-
-def get_session_name() -> str:
-    h = datetime.now(timezone.utc).hour
-    # Asia: 22:00-08:00 UTC (17:00-03:00 EST)
-    if h >= 22 or h < 8:  return "ASIA"
-    # EU: 08:00-13:00 UTC (03:00-08:00 EST)
-    if 8  <= h < 13:      return "EU"
-    # EU/US overlap: 13:00-17:00 UTC (08:00-12:00 EST)
-    if 13 <= h < 17:      return "EU_US"
-    # US: 17:00-22:00 UTC (12:00-17:00 EST)
-    return "US"
-
-
-def is_asia_session() -> bool:
-    return get_session_name() == "ASIA"
+def score_bounce_short(j15m, j1h, rsi15m, ask_pct, adx,
+                       j5m: float = 50.0, trend: str = "Neutral") -> tuple[int, str, int]:
+    tier, lev = _leverage_tier(adx)
+    if not (j15m > J15M_SHORT_GATE and j1h > J1H_SHORT_MIN
+            and rsi15m > RSI15M_SHORT_MIN and ask_pct >= DEPTH_GATE_PCT):
+        return 0, tier, lev
+    score = 4
+    if j5m  > 80:              score += 2
+    if trend == "Strong Bear": score += 2
+    if adx  >= 40:             score += 2
+    if score >= 10:
+        lev, tier = min(25, max(lev, 10)), "HIGH_CONVICTION"
+    return score, tier, lev
 
 
-# ── Cooldown helpers ───────────────────────────────────────────────────────────
+def score_bounce_long(j15m, j1h, rsi15m, bid_pct, adx,
+                      j5m: float = 50.0, trend: str = "Neutral") -> tuple[int, str, int]:
+    tier, lev = _leverage_tier(adx)
+    if not (j15m < J15M_LONG_GATE and j1h < J1H_LONG_MAX
+            and rsi15m < RSI15M_LONG_MAX and bid_pct >= DEPTH_GATE_PCT):
+        return 0, tier, lev
+    score = 4
+    if j5m  < 20:              score += 2
+    if trend == "Strong Bull": score += 2
+    if adx  >= 40:             score += 2
+    if score >= 10:
+        lev, tier = min(25, max(lev, 10)), "HIGH_CONVICTION"
+    return score, tier, lev
 
-def set_cooldown(symbol: str, direction: str):
+
+# ── Cooldown helpers ──────────────────────────────────────────────────────────
+
+def set_close_cooldown(symbol: str, direction: str):
     _cooldowns[f"{symbol}{direction}"] = time.time() + COOLDOWN_SECONDS
 
 
@@ -220,230 +235,320 @@ def clear_all_scanner_state():
     _scan_count = 0
 
 
-# ── Market health ──────────────────────────────────────────────────────────────
+def get_session_name() -> str:
+    """Return current trading session name based on UTC hour."""
+    h = datetime.now(timezone.utc).hour
+    if h >= 17 or h < 8:  return "ASIA"
+    if 8  <= h < 12:       return "EU"
+    if 12 <= h < 17:       return "US"
+    return "OFF"
+
+
+def get_session_sl_buffer() -> float:
+    """Additional SL buffer (fraction of price) added by session."""
+    s = get_session_name()
+    if s == "ASIA": return 0.003
+    if s == "EU":   return 0.001
+    return 0.0
+
 
 def compute_market_health(pair_states: list[dict], recent_trades: list[dict]) -> dict:
+    """Aggregate market-wide health; returns RUN/CAUTION/HALT per direction."""
     total = len(pair_states)
-    empty = {"short_status": "CAUTION", "long_status": "CAUTION",
-             "bear_count": 0, "bull_count": 0, "total": 0,
-             "bear_ratio": 0.0, "bull_ratio": 0.0,
-             "avg_adx": 0.0, "avg_j15": 50.0, "sl_rate": 0.0,
-             "short_reason": "Insufficient data", "long_reason": "Insufficient data"}
     if total == 0:
-        return empty
+        return {
+            "short_status": "CAUTION", "long_status": "CAUTION",
+            "bear_count": 0, "bull_count": 0, "total": 0,
+            "bear_ratio": 0.0, "bull_ratio": 0.0,
+            "avg_adx": 0.0, "avg_j5": 50.0, "sl_rate": 0.0,
+        }
     bear_count = sum(1 for s in pair_states if s.get("trend") in ("Bearish", "Strong Bear"))
     bull_count = sum(1 for s in pair_states if s.get("trend") in ("Bullish", "Strong Bull"))
     bear_ratio = bear_count / total
     bull_ratio = bull_count / total
-    adx_vals   = [s["adx1h"]  for s in pair_states if s.get("adx1h")  is not None]
-    j15_vals   = [s["j15m"]   for s in pair_states if s.get("j15m")   is not None]
+    adx_vals   = [s["adx1h"] for s in pair_states if s.get("adx1h") is not None]
+    j5_vals    = [s["j5m"]   for s in pair_states if s.get("j5m")  is not None]
     avg_adx    = sum(adx_vals) / len(adx_vals) if adx_vals else 0.0
-    avg_j15    = sum(j15_vals) / len(j15_vals) if j15_vals else 50.0
-    recent6    = [t for t in recent_trades if t.get("close_reason")][-6:]
+    avg_j5     = sum(j5_vals)  / len(j5_vals)  if j5_vals  else 50.0
+    recent6    = [t for t in recent_trades
+                  if (t.get("close_reason") or t.get("exit_reason"))][-6:]
     sl_rate    = (
-        sum(1 for t in recent6 if (t.get("close_reason", "") or "").upper().startswith("SL"))
+        sum(1 for t in recent6
+            if (t.get("close_reason") or t.get("exit_reason") or "").upper().startswith("SL"))
         / len(recent6)
     ) if recent6 else 0.0
-
-    if bear_ratio >= 0.6 and avg_adx >= 35 and avg_j15 <= 70 and sl_rate < 0.4:
+    if bear_ratio >= 0.6 and avg_adx >= 35 and avg_j5 <= 70 and sl_rate < 0.4:
         short_status = "RUN"
-        short_reason = f"{bear_count}/{total} pairs bearish, ADX avg {avg_adx:.0f}"
-    elif bear_ratio < 0.3 or sl_rate >= 0.6 or (avg_j15 >= 85 and bear_ratio < 0.5):
+    elif bear_ratio < 0.3 or sl_rate >= 0.6 or (avg_j5 >= 85 and bear_ratio < 0.5):
         short_status = "HALT"
-        short_reason = "Low bear conviction or high SL rate"
     else:
         short_status = "CAUTION"
-        short_reason = "Mixed conditions"
-
-    if bull_ratio >= 0.6 and avg_adx >= 35 and avg_j15 >= 30 and sl_rate < 0.4:
+    if bull_ratio >= 0.6 and avg_adx >= 35 and avg_j5 >= 30 and sl_rate < 0.4:
         long_status = "RUN"
-        long_reason = f"{bull_count}/{total} pairs bullish, ADX avg {avg_adx:.0f}"
-    elif bull_ratio < 0.3 or sl_rate >= 0.6 or (avg_j15 <= 15 and bull_ratio < 0.5):
+    elif bull_ratio < 0.3 or sl_rate >= 0.6 or (avg_j5 <= 15 and bull_ratio < 0.5):
         long_status = "HALT"
-        long_reason = "Low bull conviction or high SL rate"
     else:
         long_status = "CAUTION"
-        long_reason = "Mixed conditions"
-
     return {
-        "short_status": short_status, "long_status": long_status,
-        "bear_count": bear_count,     "bull_count": bull_count,
-        "total": total,
-        "bear_ratio": round(bear_ratio, 3), "bull_ratio": round(bull_ratio, 3),
-        "avg_adx":  round(avg_adx, 1),      "avg_j15":  round(avg_j15, 1),
-        "sl_rate":  round(sl_rate, 3),
-        "short_reason": short_reason,        "long_reason": long_reason,
+        "short_status": short_status,
+        "long_status":  long_status,
+        "bear_count":   bear_count,
+        "bull_count":   bull_count,
+        "total":        total,
+        "bear_ratio":   round(bear_ratio, 3),
+        "bull_ratio":   round(bull_ratio, 3),
+        "avg_adx":      round(avg_adx, 1),
+        "avg_j5":       round(avg_j5, 1),
+        "sl_rate":      round(sl_rate, 3),
     }
 
 
-# ── Main scan ──────────────────────────────────────────────────────────────────
+# ── Main scan ─────────────────────────────────────────────────────────────────
 
-async def _fetch_pair_data(client: MexcClient, symbol: str):
-    candles_15m, candles_1h, book, price = await asyncio.gather(
-        client.fetch_candles(symbol, INTERVAL_15M, 100),
-        client.fetch_candles(symbol, INTERVAL_1H,  100),
-        client.fetch_orderbook(symbol, 20),
-        client.fetch_price(symbol),
-    )
-    return candles_15m, candles_1h, book, price
-
-
-async def run_full_scan(client: MexcClient) -> list[dict]:
+async def run_full_scan(hl_client, market_health: Optional[dict] = None) -> list[dict]:
     global _scan_count
+
     _scan_count += 1
     new_alerts: list[dict] = []
 
     for symbol in PAIRS:
         try:
-            await asyncio.sleep(0.4)   # gentle rate-limit: 10 pairs × 0.4s = 4s spread
-
-            # ZEC Asia-session gate — only scan ZEC during Asia session
-            if symbol == "ZEC_USDT" and not is_asia_session():
-                continue
-
-            candles_15m, candles_1h, book, price = await _fetch_pair_data(client, symbol)
+            await asyncio.sleep(0.5)  # rate-limit spacing — 12 pairs × 0.5s = 6s minimum spread
+            candles_5m, candles_15m, candles_1h, book, price = await _fetch_pair_data(hl_client, symbol)
 
             if not price or price == 0:
-                log.warning(f"[SCAN] {symbol} — null price, skipping")
+                log.warning(f"[SCAN] {symbol} — no price, skipping")
                 continue
 
-            # ── Indicators ─────────────────────────────────────────────────────
+            # ── Indicators ────────────────────────────────────────────────────
+            _, _, j5m  = _compute_kdj(candles_5m)
             _, _, j15m = _compute_kdj(candles_15m)
             _, _, j1h  = _compute_kdj(candles_1h)
             rsi15m     = _compute_rsi(candles_15m)
+            rsi1h      = _compute_rsi(candles_1h)
+            atr5m      = _compute_atr(candles_5m)
             atr15m     = _compute_atr(candles_15m)
+            atr1h      = _compute_atr(candles_1h)
             adx1h      = _compute_adx(candles_1h)
-            trend      = _trend_from_ma(price, candles_15m, candles_1h, adx1h)
+            ma10       = _compute_ma(candles_1h, 10)
+            ma30       = _compute_ma(candles_1h, 30)
+            ma60       = _compute_ma(candles_1h, 60)
+            trend      = _trend_from_ma(price, candles_5m, candles_15m, candles_1h, adx1h)
             bid_pct, ask_pct = _depth_pcts(book)
 
-            # ── SL distance ────────────────────────────────────────────────────
+            vol_15m    = candles_15m[-1]["volume"] if candles_15m else 0
+            vol_ma15m  = (sum(c["volume"] for c in candles_15m[-10:]) / min(10, len(candles_15m))
+                          if candles_15m else 0)
+
+            # ── SL distance (ATR base, floored by MIN_SL_PCT + session buffer) ───────────────────────────────────────────────────
             _sl_atr      = atr15m * ATR_SL_MULTIPLIER
             _min_sl_pct  = MIN_SL_PCT.get(symbol, MIN_SL_PCT_DEFAULT)
-            sl_dist      = max(_sl_atr, price * _min_sl_pct) if _min_sl_pct else _sl_atr
+            _sess_buf    = get_session_sl_buffer()
+            _min_sl_dist = price * (_min_sl_pct + _sess_buf)
+            sl_dist      = max(_sl_atr, _min_sl_dist)
 
-            # ── ADX fade-max gate ──────────────────────────────────────────────
-            if adx1h > ADX_FADE_MAX:
-                log.debug(f"[SCAN] {symbol} ADX {adx1h:.1f} > {ADX_FADE_MAX} — skipping (fade max)")
-
-            tier, lev = _leverage_tier(adx1h)
-
+            # ── Score both directions ─────────────────────────────────────────
             for direction in ("SHORT", "LONG"):
                 key = f"{symbol}{direction}"
 
                 if get_cooldown_remaining(symbol, direction) > 0:
                     continue
 
-                # ── ADX fade-max blocks alert firing ──
-                if adx1h > ADX_FADE_MAX:
-                    continue
+                # ── Pair ADX override gate ────────────────────────
+                if symbol in PAIR_ADX_OVERRIDES:
+                    _adx_min = PAIR_ADX_OVERRIDES[symbol]
+                    if adx1h < _adx_min:
+                        log.info(f"[SKIP] {symbol} {direction} — "
+                                 f"ADX {adx1h:.1f} below pair minimum {_adx_min}")
+                        _pending.pop(f"{symbol}{direction}", None)
+                        _last_scores.pop(f"{symbol}{direction}", None)
+                        continue
 
-                # ── Binary 4/4 gate check ──────────────────────────────────────
                 if direction == "SHORT":
-                    gates_pass = (
-                        j15m  > J15M_SHORT_GATE    and
-                        j1h   > J1H_SHORT_MIN      and
-                        rsi15m > RSI15M_SHORT_MIN  and
-                        ask_pct >= DEPTH_GATE_PCT
-                    )
+                    score, tier, lev = score_bounce_short(j15m, j1h, rsi15m, ask_pct, adx1h, j5m=j5m, trend=trend)
+                    log_gates = (f"j15m={j15m:.1f}(need>{J15M_SHORT_GATE}) "
+                                 f"j1h={j1h:.1f}(need>{J1H_SHORT_MIN}) "
+                                 f"rsi15m={rsi15m:.1f}(need>{RSI15M_SHORT_MIN}) "
+                                 f"ask={ask_pct:.1f}%(need>={DEPTH_GATE_PCT}%)")
                 else:
-                    gates_pass = (
-                        j15m  < J15M_LONG_GATE     and
-                        j1h   < J1H_LONG_MAX       and
-                        rsi15m < RSI15M_LONG_MAX   and
-                        bid_pct >= DEPTH_GATE_PCT
-                    )
+                    score, tier, lev = score_bounce_long(j15m, j1h, rsi15m, bid_pct, adx1h, j5m=j5m, trend=trend)
+                    log_gates = (f"j15m={j15m:.1f}(need<{J15M_LONG_GATE}) "
+                                 f"j1h={j1h:.1f}(need<{J1H_LONG_MAX}) "
+                                 f"rsi15m={rsi15m:.1f}(need<{RSI15M_LONG_MAX}) "
+                                 f"bid={bid_pct:.1f}%(need>={DEPTH_GATE_PCT}%)")
 
-                score = 4 if gates_pass else 0
-                _last_scores[key] = score
-
-                if not gates_pass:
+                if score >= 4:
+                    log.info(f"[SCORE] {symbol} {direction} gates=PASS score={score} {log_gates}")
+                else:
+                    if _last_scores.get(key, 0) >= 4:
+                        log.info(f"[SCORE] {symbol} {direction} score=0 {log_gates}")
+                    _last_scores[key] = 0
                     _pending.pop(key, None)
                     continue
 
-                # ── Two-consecutive-scan gate ──────────────────────────────────
-                if key not in _pending:
+                # Consecutive scan confirmation
+                if _last_scores.get(key, 0) < 4:
+                    _last_scores[key] = score
                     _pending[key] = {
                         "symbol": symbol, "direction": direction,
-                        "j15m": j15m, "j1h": j1h, "rsi15m": rsi15m,
-                        "ask_pct": ask_pct, "bid_pct": bid_pct,
-                        "adx": adx1h, "price": price,
+                        "score": score, "tier": tier,
                     }
-                    log.info(f"[SCAN] {symbol} {direction} — 1st scan confirmed, awaiting 2nd")
+                    log.info(f"[SCORE] {symbol} {direction} first-scan confirmed — awaiting 2nd")
                     continue
 
-                # ── 2nd scan confirmed — fire alert ───────────────────────────
-                _pending.pop(key, None)
-                set_cooldown(symbol, direction)
+                # Second consecutive scan — check ADX fade-max before emitting alert
+                _last_scores[key] = score
 
-                # SL / TP calculation
+                if adx1h > ADX_FADE_MAX:
+                    log.info(f"[SKIP] {symbol} {direction} adx={adx1h:.1f} exceeds fade max {ADX_FADE_MAX} — trend too strong to fade")
+                    continue
+
+                # Compute SL / TP prices (HC score-10: 2.5R TP1, 3.5R TP2)
+                is_hc = score >= 10
                 if direction == "SHORT":
-                    sl_price  = round(price + sl_dist, 8)
-                    tp1_price = round(price - sl_dist * TP1_R, 8)
-                    tp2_price = round(price - sl_dist * TP2_R, 8)
-                    be_price  = round(price - price * 0.001, 8)   # ~0.1% fees
+                    sl_price = round(price + sl_dist, 6)
+                    if is_hc:
+                        partial_price = round(price - sl_dist * 1.5, 6)
+                        tp1_price     = round(price - sl_dist * 2.5, 6)
+                        tp2_price     = round(price - sl_dist * 3.5, 6)
+                    else:
+                        partial_price = None
+                        tp1_price     = round(price - sl_dist * TP1_R, 6)
+                        tp2_price     = round(price - sl_dist * TP2_R, 6)
                 else:
-                    sl_price  = round(price - sl_dist, 8)
-                    tp1_price = round(price + sl_dist * TP1_R, 8)
-                    tp2_price = round(price + sl_dist * TP2_R, 8)
-                    be_price  = round(price + price * 0.001, 8)
+                    sl_price = round(price - sl_dist, 6)
+                    if is_hc:
+                        partial_price = round(price + sl_dist * 1.5, 6)
+                        tp1_price     = round(price + sl_dist * 2.5, 6)
+                        tp2_price     = round(price + sl_dist * 3.5, 6)
+                    else:
+                        partial_price = None
+                        tp1_price     = round(price + sl_dist * TP1_R, 6)
+                        tp2_price     = round(price + sl_dist * TP2_R, 6)
 
-                session = get_session_name()
+                dollar_risk = round(
+                    2000.0 * lev * (sl_dist / price) if price else 0, 2
+                )
 
                 alert = {
-                    "symbol":    symbol,
-                    "direction": direction,
-                    "tier":      tier,
-                    "leverage":  lev,
-                    "price":     price,
-                    "sl_price":  sl_price,
-                    "tp1_price": tp1_price,
-                    "tp2_price": tp2_price,
-                    "be_price":  be_price,
-                    "sl_dist":   round(sl_dist, 8),
-                    "j15m":      round(j15m,  1),
-                    "j1h":       round(j1h,   1),
-                    "rsi15m":    round(rsi15m, 1),
-                    "ask_pct":   round(ask_pct, 1),
-                    "bid_pct":   round(bid_pct, 1),
-                    "adx":       round(adx1h, 1),
-                    "trend":     trend,
-                    "session":   session,
-                    "atr15m":    round(atr15m, 8),
+                    "symbol":       symbol,
+                    "direction":    direction,
+                    "score":        score,
+                    "tier":         tier,
+                    "leverage":     lev,
+                    "entry_price":  price,
+                    "sl_price":     sl_price,
+                    "sl_dist":      round(sl_dist, 6),
+                    "tp1_price":    tp1_price,
+                    "tp2_price":    tp2_price,
+                    "dollar_risk":  dollar_risk,
+                    "j15m":         round(j15m, 2),
+                    "j1h":          round(j1h, 2),
+                    "j5m":          round(j5m, 2),
+                    "rsi15m":       round(rsi15m, 2),
+                    "rsi1h":        round(rsi1h, 2),
+                    "atr15m":       round(atr15m, 6),
+                    "adx1h":        round(adx1h, 2),
+                    "bid_pct":      bid_pct,
+                    "ask_pct":      ask_pct,
+                    "trend":        trend,
+                    "ma10":         round(ma10, 6) if ma10 else None,
+                    "ma30":         round(ma30, 6) if ma30 else None,
+                    "ma60":         round(ma60, 6) if ma60 else None,
+                    "fired_at":     int(time.time()),
+                    "is_in_trade":   False,
+                    "is_score10":    is_hc,
+                    "margin":        MARGIN_PER_TRADE * 2 if is_hc else MARGIN_PER_TRADE,
+                    "partial_price": partial_price,
+                    "session":       get_session_name(),
                 }
                 new_alerts.append(alert)
-                log.info(f"[ALERT] {symbol} {direction} {tier} {lev}x @ {price}")
+                _pending.pop(key, None)
+                log.info(f"[ALERT] {symbol} {direction} tier={tier} lev={lev}x entry={price} "
+                         f"sl={sl_price} tp1={tp1_price} adx={adx1h:.1f}")
 
         except Exception as e:
             log.error(f"[SCAN] {symbol} error: {e}", exc_info=True)
 
+    log.info(f"[SCAN] #{_scan_count} complete — {len(new_alerts)} new alerts")
     return new_alerts
 
 
-async def scan_pair_fast(client: MexcClient, symbol: str) -> dict:
-    """Single-pair data fetch for overlay fast-poll (/api/pair/{symbol})."""
-    try:
-        candles_15m, candles_1h, book, price = await _fetch_pair_data(client, symbol)
-        if not price:
-            return {"symbol": symbol, "price": None}
-        _, _, j15m = _compute_kdj(candles_15m)
-        _, _, j1h  = _compute_kdj(candles_1h)
-        rsi15m     = _compute_rsi(candles_15m)
-        adx1h      = _compute_adx(candles_1h)
-        atr15m     = _compute_atr(candles_15m)
-        trend      = _trend_from_ma(price, candles_15m, candles_1h, adx1h)
-        bid_pct, ask_pct = _depth_pcts(book)
-        return {
-            "symbol":  symbol,
-            "price":   price,
-            "j15m":    round(j15m,   1),
-            "j1h":     round(j1h,    1),
-            "rsi15m":  round(rsi15m, 1),
-            "adx1h":   round(adx1h,  1),
-            "atr15m":  round(atr15m, 8),
-            "bid_pct": round(bid_pct, 1),
-            "ask_pct": round(ask_pct, 1),
-            "trend":   trend,
-        }
-    except Exception as e:
-        log.error(f"[FAST] {symbol}: {e}")
-        return {"symbol": symbol, "price": None}
+async def scan_pair_state(hl_client) -> list[dict]:
+    """Return lightweight per-pair indicator state for the dashboard grid."""
+    states = []
+    for symbol in PAIRS:
+        try:
+            await asyncio.sleep(0.5)  # rate-limit spacing between pairs
+            candles_5m, candles_15m, candles_1h, book, price = await _fetch_pair_data(hl_client, symbol)
+            if not price:
+                states.append({"symbol": symbol, "price": 0})
+                continue
+
+            _, _, j5m  = _compute_kdj(candles_5m)
+            _, _, j15m = _compute_kdj(candles_15m)
+            _, _, j1h  = _compute_kdj(candles_1h)
+            rsi15m     = _compute_rsi(candles_15m)
+            rsi1h      = _compute_rsi(candles_1h)
+            atr15m     = _compute_atr(candles_15m)
+            adx1h      = _compute_adx(candles_1h)
+            ma10       = _compute_ma(candles_1h, 10)
+            ma30       = _compute_ma(candles_1h, 30)
+            ma60       = _compute_ma(candles_1h, 60)
+            trend      = _trend_from_ma(price, candles_5m, candles_15m, candles_1h, adx1h)
+            bid_pct, ask_pct = _depth_pcts(book)
+
+            short_score, short_tier, short_lev = score_bounce_short(j15m, j1h, rsi15m, ask_pct, adx1h, j5m=j5m, trend=trend)
+            long_score,  long_tier,  long_lev  = score_bounce_long(j15m, j1h, rsi15m, bid_pct, adx1h, j5m=j5m, trend=trend)
+
+            states.append({
+                "symbol":      symbol,
+                "price":       price,
+                "j5m":         round(j5m, 2),
+                "j15m":        round(j15m, 2),
+                "j1h":         round(j1h, 2),
+                "rsi15m":      round(rsi15m, 2),
+                "rsi1h":       round(rsi1h, 2),
+                "atr15m":      round(atr15m, 6),
+                "adx1h":       round(adx1h, 2),
+                "bid_pct":     bid_pct,
+                "ask_pct":     ask_pct,
+                "trend":       trend,
+                "ma10":        round(ma10, 6) if ma10 else None,
+                "ma30":        round(ma30, 6) if ma30 else None,
+                "ma60":        round(ma60, 6) if ma60 else None,
+                "short_score": short_score,
+                "short_tier":  short_tier,
+                "long_score":  long_score,
+                "long_tier":   long_tier,
+                "cooldown_short": get_cooldown_remaining(symbol, "SHORT"),
+                "cooldown_long":  get_cooldown_remaining(symbol, "LONG"),
+            })
+        except Exception as e:
+            log.error(f"[STATE] {symbol} error: {e}")
+            states.append({"symbol": symbol, "price": 0})
+    return states
+
+
+async def _fetch_pair_data(hl_client, symbol: str):
+    candles_5m, candles_15m, candles_1h, book, price = await asyncio.gather(
+        hl_client.get_candles(symbol, "5m",  100),
+        hl_client.get_candles(symbol, "15m", 100),
+        hl_client.get_candles(symbol, "1h",  100),
+        hl_client.get_orderbook(symbol, 20),
+        hl_client.get_price(symbol),
+    )
+    return candles_5m, candles_15m, candles_1h, book, price
+
+
+def log_startup_config():
+    log.info(
+        f"[CONFIG] PAIRS={len(PAIRS)} "
+        f"J15M_SHORT={J15M_SHORT_GATE} J15M_LONG={J15M_LONG_GATE} "
+        f"J1H_SHORT_MIN={J1H_SHORT_MIN} J1H_LONG_MAX={J1H_LONG_MAX} "
+        f"RSI_SHORT={RSI15M_SHORT_MIN} RSI_LONG={RSI15M_LONG_MAX} "
+        f"DEPTH={DEPTH_GATE_PCT}% ATR_SL={ATR_SL_MULTIPLIER}x "
+        f"ADX_FADE_MAX={ADX_FADE_MAX} "
+        f"COOLDOWN={COOLDOWN_SECONDS//60}min "
+        f"CIRCUIT_BREAKER={CONSECUTIVE_LOSS_STOP} PAPER={PAPER_MODE}"
+    )

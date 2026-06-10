@@ -417,6 +417,8 @@ def _append_trade_log(trade: dict, exit_price: float, reason: str, pnl: float, r
                 "open_time":        open_iso,
                 "close_time":       close_iso,
                 "duration_seconds": now_ts - opened_at,
+                "stoch_k":          trade.get("stoch_k"),
+                "stoch_d":          trade.get("stoch_d"),
             }).execute()
         except Exception as _e:
             print(f"[PERSIST] trade_log insert error: {_e}")
@@ -774,6 +776,8 @@ async def _scan_loop():
                         "rsi15m":      _ps.get("rsi15m"),
                         "adx1h":       _ps.get("adx1h"),
                         "score_long":  _ps.get("long_score"),
+                        "stoch_k":     _ps.get("stoch_k"),
+                        "stoch_d":     _ps.get("stoch_d"),
                         "score_short": _ps.get("short_score"),
                     }
                     _hist = app_state.scan_snapshots.get(_sym, [])
@@ -1162,7 +1166,7 @@ async def index(request: Request):
         "paper_mode":    PAPER_MODE,
         "scan_interval": SCAN_INTERVAL_SECONDS,
         "margin_cap":    MARGIN_HARD_CAP,
-    })
+    }, headers={"Content-Type": "text/html; charset=utf-8"})
 
 
 @app.get("/api/state")
@@ -1192,14 +1196,18 @@ async def get_pair(symbol: str):
     j1h     = ps.get("j1h",     50)
     rsi15m  = ps.get("rsi15m",  50)
     bid_pct = ps.get("bid_pct", 50)
+    stoch_k      = ps.get("stoch_k",      50)
+    stoch_d      = ps.get("stoch_d",      50)
+    stoch_k_prev = ps.get("stoch_k_prev", 50)
+    stoch_d_prev = ps.get("stoch_d_prev", 50)
     ask_pct = ps.get("ask_pct", 50)
     adx     = ps.get("adx1h",   0)
     atr     = ps.get("atr15m",  0)
     price   = app_state.prices.get(symbol, ps.get("price", 0))
     chg     = app_state.price_changes.get(symbol)
 
-    gate_long  = [j15m < 20, j1h < 40, rsi15m < 35, bid_pct >= 55]
-    gate_short = [j15m > 80, j1h > 60, rsi15m > 65, ask_pct >= 55]
+    gate_long  = [j15m < 20, j1h < 40, stoch_k < 25 and stoch_k_prev <= stoch_d_prev and stoch_k > stoch_d, bid_pct >= 55]
+    gate_short = [j15m > 80, j1h > 60, stoch_k > 75 and stoch_k_prev >= stoch_d_prev and stoch_k < stoch_d, ask_pct >= 55]
     score_long  = sum(gate_long)
     score_short = sum(gate_short)
     confluence_long  = j15m < 20 and j1h < 40
@@ -1263,6 +1271,10 @@ async def get_pair(symbol: str):
         "j1h":                 j1h,
         "rsi15m":              rsi15m,
         "adx":                 adx,
+        "stoch_k":             stoch_k,
+        "stoch_d":             stoch_d,
+        "stoch_k_prev":        stoch_k_prev,
+        "stoch_d_prev":        stoch_d_prev,
         "atr":                 atr,
         "bid_pct":             bid_pct,
         "ask_pct":             ask_pct,

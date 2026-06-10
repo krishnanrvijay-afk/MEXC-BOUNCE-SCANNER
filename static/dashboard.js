@@ -257,6 +257,10 @@ function buildCard(p, alerts, trades, changes) {
   const bidPct = p.bid_pct || 0;
   const askPct = p.ask_pct || 0;
   const adx1h  = p.adx1h   || 0;
+  const stochK     = p.stoch_k      || 0;
+  const stochD     = p.stoch_d      || 0;
+  const stochKPrev = p.stoch_k_prev || 0;
+  const stochDPrev = p.stoch_d_prev || 0;
   const cdS    = p.cooldown_short || 0;
   const cdL    = p.cooldown_long  || 0;
   const inTrade = p.in_trade;
@@ -275,8 +279,8 @@ function buildCard(p, alerts, trades, changes) {
                  : '#ffffff';
 
   // Gate counts
-  const shortGates = [j15m > 80, j1h > 60, rsi15m > 65, askPct >= 55];
-  const longGates  = [j15m < 20, j1h < 40, rsi15m < 35, bidPct >= 55];
+  const shortGates = [j15m > 80, j1h > 60, stochK > 75 && stochKPrev >= stochDPrev && stochK < stochD, askPct >= 55];
+  const longGates  = [j15m < 20, j1h < 40, stochK < 25 && stochKPrev <= stochDPrev && stochK > stochD, bidPct >= 55];
   const shortCount = shortGates.filter(Boolean).length;
   const longCount  = longGates.filter(Boolean).length;
   const shortFull  = shortCount === 4;
@@ -343,19 +347,22 @@ function buildCard(p, alerts, trades, changes) {
 
   // ── Gate rows: RSI + DEPTH only (J moved to symbol line) ─────────────────────
   let rows = '';
-  if (showShort) rows += dirRow('SHORT', rsi15m, askPct);
-  if (showLong)  rows += dirRow('LONG',  rsi15m, bidPct);
+  if (showShort) rows += dirRow('SHORT', stochK, stochD, rsi15m, askPct);
+  if (showLong)  rows += dirRow('LONG',  stochK, stochD, rsi15m, bidPct);
 
   // ── Confluence mini bars (RSI + Depth) — shown only on confluence cards ───────
   let confBars = '';
   if (isConf) {
     const depthPct   = confIsLong ? bidPct : askPct;
     const depthLabel = confIsLong ? 'BID' : 'ASK';
-    const depthPass  = depthPct >= 55;
-    const rsiPass    = confIsLong ? rsi15m < 35 : rsi15m > 65;
-    const rsiPct     = Math.min(100, Math.max(0, rsi15m));
-    const rsiCurCol  = confIsLong ? (rsi15m < 35 ? '#00e676' : '#555') : (rsi15m > 65 ? '#ff3d57' : '#555');
-    const rsiDotCls  = rsiPass ? (confIsLong ? 'long-pass' : 'short-pass') : (confIsLong ? 'long-fail' : 'short-fail');
+    const stochPass   = confIsLong ? longGates[2] : shortGates[2];
+    const stochKPct2  = Math.min(99, Math.max(0, stochK));
+    const stochDPct2  = Math.min(99, Math.max(0, stochD));
+    const stochKCol   = confIsLong ? (stochK < 25 ? '#00e676' : '#555') : (stochK > 75 ? '#ff3d57' : '#555');
+    const stochDotCls = stochPass ? (confIsLong ? 'long-pass' : 'short-pass') : (confIsLong ? 'long-fail' : 'short-fail');
+    const stochEcl    = Math.abs(stochK - stochD) < 5;
+    const stochDBrd   = stochEcl ? '1px solid #00ff88' : '1px solid rgba(136,136,136,0.7)';
+    const stochDGlw   = stochEcl ? '0 0 5px rgba(0,255,136,0.4)' : 'none';
     const dptDotCls  = depthPass ? (confIsLong ? 'long-pass' : 'short-pass') : (confIsLong ? 'long-fail' : 'short-fail');
     const fillPct    = Math.min(100, Math.max(0, depthPct));
     const fillColor  = confIsLong
@@ -367,15 +374,17 @@ function buildCard(p, alerts, trades, changes) {
     const gateLinePct = confIsLong ? 55 : 45;
 
     confBars = `<div class="cbar-row">
-      <span class="gc-dot cbar-dot ${rsiDotCls}"></span>
-      <span class="cbar-label">RSI</span>
-      <div class="cbar-track">
-        <div class="cbar-zg" style="width:35%"></div>
-        <div class="cbar-zr" style="left:65%;width:35%"></div>
-        <div class="cbar-thresh cbar-thresh-l" style="left:35%"></div>
-        <div class="cbar-thresh cbar-thresh-r" style="left:65%"></div>
-        <div class="cbar-cursor" style="left:${rsiPct}%;background:${rsiCurCol};box-shadow:0 0 5px ${rsiCurCol}"></div>
+      <span class="gc-dot cbar-dot ${stochDotCls}"></span>
+      <span class="cbar-label">STOCH</span>
+      <div class="cbar-track" style="position:relative">
+        <div class="cbar-zg" style="width:25%"></div>
+        <div class="cbar-zr" style="left:75%;width:25%"></div>
+        <div class="cbar-thresh cbar-thresh-l" style="left:25%"></div>
+        <div class="cbar-thresh cbar-thresh-r" style="left:75%"></div>
+        <div class="cbar-cursor" style="left:${stochKPct2}%;background:${stochKCol};box-shadow:0 0 5px ${stochKCol}"></div>
+        <div style="position:absolute;top:50%;transform:translate(-50%,-50%);left:${stochDPct2}%;width:10px;height:10px;border-radius:2px;border:${stochDBrd};background:transparent;pointer-events:none;box-shadow:${stochDGlw}"></div>
       </div>
+      <span style="font-size:9px;color:#555;margin-left:3px">${rsi15m.toFixed(0)}</span>
     </div>
     <div class="cbar-row">
       <span class="gc-dot cbar-dot ${dptDotCls}"></span>
@@ -437,18 +446,18 @@ function buildCard(p, alerts, trades, changes) {
   </div>`;
 }
 
-function dirRow(direction, rsi15m, depthPct) {
+function dirRow(direction, stochK, stochD, rsi15m, depthPct) {
   const isLong     = direction === 'LONG';
   const rowCls     = isLong ? 'long-row' : 'short-row';
   const depthLabel = isLong ? 'BID%' : 'ASK%';
-  const rsiColor   = isLong ? (rsi15m < 35 ? 'green' : 'grey') : (rsi15m > 65 ? 'red' : 'grey');
+  const stochColor = isLong ? (stochK < 25 ? 'green' : 'grey') : (stochK > 75 ? 'red' : 'grey');
   const depthColor = depthPct >= 55 ? (isLong ? 'green' : 'red') : 'grey';
 
   return `<div class="dir-row ${rowCls}">
     <div class="dir-vals">
       <div class="dv-item">
-        <span class="dv-label">RSI15</span>
-        <span class="dv-val ${rsiColor}">${rsi15m.toFixed(0)}</span>
+        <span class="dv-label">STOCH</span>
+        <span class="dv-val ${stochColor}">${stochK.toFixed(0)}/${stochD.toFixed(0)}</span><span style="font-size:9px;color:#555;margin-left:3px">RSI${rsi15m.toFixed(0)}</span>
       </div>
       <div class="dv-item">
         <span class="dv-label">${depthLabel}</span>
@@ -794,6 +803,8 @@ function buildPosCard(t, prices, pairStates) {
   const adx   = ps.adx1h  ?? t.adx1h  ?? 0;
   const rsi   = ps.rsi15m ?? t.rsi15m ?? 0;
   const j15m  = ps.j15m   ?? t.j15m   ?? 0;
+  const sK    = ps.stoch_k ?? t.stoch_k ?? 0;
+  const sD    = ps.stoch_d ?? t.stoch_d ?? 0;
   const bidPc = ps.bid_pct ?? t.bid_pct ?? 0;
   const askPc = ps.ask_pct ?? t.ask_pct ?? 0;
   const dPct  = isLong ? bidPc : askPc;
@@ -807,7 +818,7 @@ function buildPosCard(t, prices, pairStates) {
   // Scan narrative
   const jTr  = j15m > 60 ? 'rising' : j15m < 40 ? 'falling' : 'flat';
   const narr = ps.symbol
-    ? `SCAN  J ${(+j15m).toFixed(1)}  ${dLbl} ${(+dPct).toFixed(1)}%  ADX ${(+adx).toFixed(1)}  RSI ${(+rsi).toFixed(1)}  J ${jTr}`
+    ? `SCAN  J ${(+j15m).toFixed(1)}  ${dLbl} ${(+dPct).toFixed(1)}%  ADX ${(+adx).toFixed(1)}  RSI ${(+rsi).toFixed(1)}  K/D ${(+sK).toFixed(0)}/${(+sD).toFixed(0)}  J ${jTr}`
     : 'SCAN  awaiting next scan…';
 
   const tid      = `pct-${sym}-${t.direction}`;
@@ -880,7 +891,7 @@ function buildPosCard(t, prices, pairStates) {
 
   <div class="pcv2-metrics">
     <div class="pcv2-metric"><span class="pcv2-ml" style="color:#fff;font-weight:700">ADX</span><span class="pcv2-mv" style="color:${adxCl(adx)}">${(+adx).toFixed(1)}</span></div>
-    <div class="pcv2-metric"><span class="pcv2-ml" style="color:#fff;font-weight:700">RSI15M</span><span class="pcv2-mv" style="color:${rsiCl(rsi)}">${(+rsi).toFixed(1)}</span></div>
+    <div class="pcv2-metric"><span class="pcv2-ml" style="color:#fff;font-weight:700">STOCH</span><span class="pcv2-mv" style="color:${+sK > 75 ? '#ff4444' : +sK < 25 ? '#00ff88' : '#fff'}">${(+sK).toFixed(0)}/${(+sD).toFixed(0)}</span><span style="color:#555;font-size:9px;margin-left:3px">RSI${(+rsi).toFixed(0)}</span></div>
     <div class="pcv2-metric"><span class="pcv2-ml" style="color:#fff;font-weight:700">J15M</span><span class="pcv2-mv" style="color:${jCl(j15m)}">${(+j15m).toFixed(1)}</span></div>
     <div class="pcv2-metric"><span class="pcv2-ml" style="color:#fff;font-weight:700">${dLbl}</span><span class="pcv2-mv" style="color:${dCol}">${(+dPct).toFixed(1)}%</span></div>
   </div>
@@ -1428,6 +1439,12 @@ function _ovGateBarsHtml(d, dir) {
   const j15m    = d.j15m    || 0;
   const j1h     = d.j1h     || 0;
   const rsi     = d.rsi15m  || 0;
+  const stochK2    = d.stoch_k || 0;
+  const stochD2    = d.stoch_d || 0;
+  const stochKC2   = stochK2 < 25 ? '#00e676' : stochK2 > 75 ? '#ff3d57' : '#fff';
+  const stochEcl2  = Math.abs(stochK2 - stochD2) < 5;
+  const stochDBrd2 = stochEcl2 ? '1px solid #00ff88' : '1px solid rgba(136,136,136,0.7)';
+  const stochDGlw2 = stochEcl2 ? '0 0 5px rgba(0,255,136,0.4)' : 'none';
   const bid     = d.bid_pct || 0;
   const ask     = d.ask_pct || 0;
   const dotCls  = (pass) => pass
@@ -1465,14 +1482,26 @@ function _ovGateBarsHtml(d, dir) {
     </div>
     <div class="pov-gr" data-gi="2">
       <div class="${dotCls(gArr[2])}" id="pov-gd-2"></div>
-      <span class="pov-gn">RSI</span>
+      <span class="pov-gn">STOCH</span>
+      <div class="pov-gt" style="position:relative">
+        <div class="pov-gzg" style="width:25%"></div>
+        <div class="pov-gzr" style="left:75%;width:25%"></div>
+        <div class="pov-gth" style="left:25%"></div><div class="pov-gth" style="left:75%"></div>
+        <div class="pov-gcur" id="pov-gc-2k" style="left:${Math.min(99,stochK2).toFixed(1)}%;background:${stochKC2}"></div>
+        <div id="pov-gc-2d" style="position:absolute;top:50%;transform:translate(-50%,-50%);left:${Math.min(99,stochD2).toFixed(1)}%;width:10px;height:10px;border-radius:2px;border:${stochDBrd2};background:transparent;pointer-events:none;box-shadow:${stochDGlw2}"></div>
+      </div>
+      <span class="pov-gv" id="pov-gv-2" style="color:${stochKC2}">${stochK2.toFixed(0)}/${stochD2.toFixed(0)}</span>
+    </div>
+    <div class="pov-gr" data-gi="rsi">
+      <div class="pov-gd pov-gd-fail" style="opacity:0.25"></div>
+      <span class="pov-gn" style="color:#555">RSI</span>
       <div class="pov-gt">
         <div class="pov-gzg" style="width:35%"></div>
         <div class="pov-gzr" style="left:65%;width:35%"></div>
         <div class="pov-gth" style="left:35%"></div><div class="pov-gth" style="left:65%"></div>
-        <div class="pov-gcur" id="pov-gc-2" style="left:${Math.min(99,rsi).toFixed(1)}%;background:${rsiCol}"></div>
+        <div class="pov-gcur" id="pov-gc-rsi" style="left:${Math.min(99,rsi).toFixed(1)}%;background:${rsiCol}"></div>
       </div>
-      <span class="pov-gv" id="pov-gv-2" style="color:${rsiCol}">${rsi.toFixed(0)}</span>
+      <span class="pov-gv" id="pov-gv-rsi" style="color:${rsiCol}">${rsi.toFixed(0)}</span>
     </div>
     <div class="pov-gr" data-gi="3">
       <div class="${dotCls(gArr[3])}" id="pov-gd-3"></div>
@@ -1727,19 +1756,19 @@ function _ovUpdate(pn, d) {
 
   // Gate cursors + dot flash on pass/fail change
   const curGates = _ovGates(d, dir);
-  const vals     = [d.j15m||0, d.j1h||0, d.rsi15m||0];
-  const cols     = [
-    d.j15m   < 20 ? '#00e676' : d.j15m   > 80 ? '#ff3d57' : '#fff',
-    d.j1h    < 40 ? '#00e676' : d.j1h    > 60 ? '#ff3d57' : '#fff',
-    d.rsi15m < 35 ? '#00e676' : d.rsi15m > 65 ? '#ff3d57' : '#fff',
+  const vals01   = [d.j15m||0, d.j1h||0];
+  const cols01   = [
+    d.j15m < 20 ? '#00e676' : d.j15m > 80 ? '#ff3d57' : '#fff',
+    d.j1h  < 40 ? '#00e676' : d.j1h  > 60 ? '#ff3d57' : '#fff',
   ];
   const isL = dir !== 'SHORT';
   const dotPassCls = (pass) => pass ? (isL ? 'pov-gd pov-gd-pass-l' : 'pov-gd pov-gd-pass-s') : 'pov-gd pov-gd-fail';
-  [0, 1, 2].forEach(i => {
+  // J15M + J1H (gates 0, 1)
+  [0, 1].forEach(i => {
     const cur = document.getElementById(`pov-gc-${i}`);
-    if (cur) { cur.style.left = `${Math.min(99, vals[i]).toFixed(1)}%`; cur.style.background = cols[i]; }
+    if (cur) { cur.style.left = `${Math.min(99, vals01[i]).toFixed(1)}%`; cur.style.background = cols01[i]; }
     const val = document.getElementById(`pov-gv-${i}`);
-    if (val) { val.textContent = vals[i].toFixed(0); val.style.color = cols[i]; }
+    if (val) { val.textContent = vals01[i].toFixed(0); val.style.color = cols01[i]; }
     const dot = document.getElementById(`pov-gd-${i}`);
     if (dot) {
       dot.className = dotPassCls(curGates[i]);
@@ -1749,6 +1778,36 @@ function _ovUpdate(pn, d) {
       }
     }
   });
+  // STOCH row (gate 2): %K solid dot + eclipse %D square
+  const stochKU  = d.stoch_k || 0;
+  const stochDU  = d.stoch_d || 0;
+  const stochKCU = stochKU < 25 ? '#00e676' : stochKU > 75 ? '#ff3d57' : '#fff';
+  const gc2k = document.getElementById('pov-gc-2k');
+  if (gc2k) { gc2k.style.left = `${Math.min(99, stochKU).toFixed(1)}%`; gc2k.style.background = stochKCU; }
+  const gc2d = document.getElementById('pov-gc-2d');
+  if (gc2d) {
+    gc2d.style.left = `${Math.min(99, stochDU).toFixed(1)}%`;
+    const stochEclU = Math.abs(stochKU - stochDU) < 5;
+    gc2d.style.border    = stochEclU ? '1px solid #00ff88' : '1px solid rgba(136,136,136,0.7)';
+    gc2d.style.boxShadow = stochEclU ? '0 0 5px rgba(0,255,136,0.4)' : 'none';
+  }
+  const gv2 = document.getElementById('pov-gv-2');
+  if (gv2) { gv2.textContent = `${stochKU.toFixed(0)}/${stochDU.toFixed(0)}`; gv2.style.color = stochKCU; }
+  const gd2 = document.getElementById('pov-gd-2');
+  if (gd2) {
+    gd2.className = dotPassCls(curGates[2]);
+    if (_ovPrevGates && _ovPrevGates[2] !== curGates[2]) {
+      gd2.classList.add('pov-gd-flash');
+      setTimeout(() => gd2.classList.remove('pov-gd-flash'), 350);
+    }
+  }
+  // RSI reference row — cursor + value only, dot stays neutral
+  const gcRsi = document.getElementById('pov-gc-rsi');
+  const gvRsi = document.getElementById('pov-gv-rsi');
+  const rsiVU = d.rsi15m || 0;
+  const rsiCU = rsiVU < 35 ? '#00e676' : rsiVU > 65 ? '#ff3d57' : '#fff';
+  if (gcRsi) { gcRsi.style.left = `${Math.min(99, rsiVU).toFixed(1)}%`; gcRsi.style.background = rsiCU; }
+  if (gvRsi) { gvRsi.textContent = rsiVU.toFixed(0); gvRsi.style.color = rsiCU; }
   // Gate dot 3 — DEPTH (add to same update pass)
   const dot3 = document.getElementById('pov-gd-3');
   if (dot3) {

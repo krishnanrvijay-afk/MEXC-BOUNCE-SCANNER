@@ -46,13 +46,13 @@ from scanner import (
 )
 import scanner as _scanner_mod  # direct access to _cooldowns dict for persistence
 
-# ── Telegram config ────────────────────────────────────────────
+# ââ Telegram config ââââââââââââââââââââââââââââââââââââââââââââ
 TELEGRAM_BOT_TOKEN  = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID    = int(os.environ.get("TELEGRAM_CHAT_ID", "0") or "0")
 TELEGRAM_ENABLED    = os.environ.get("TELEGRAM_ENABLED", "true").lower() == "true"
 _pending_reminders: dict = {}
 
-# ── Global safety state ────────────────────────────────────────────────────────
+# ââ Global safety state ââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 consecutive_losses:     int   = 0
 circuit_breaker_active: bool  = False
 daily_pnl:              float = 0.0
@@ -60,7 +60,7 @@ trading_halted_today:   bool  = False
 _last_midnight_day:     int   = datetime.now(timezone.utc).day
 
 
-# ── App state ─────────────────────────────────────────────────────────────────
+# ââ App state âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 class AppState:
     def __init__(self):
@@ -184,7 +184,7 @@ app_state  = AppState()
 mexc_client: Optional[MexcClient] = None
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# ââ Helpers âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 def _retire_alert(symbol: str, direction: str):
     app_state.alerts = [
@@ -193,9 +193,9 @@ def _retire_alert(symbol: str, direction: str):
     ]
 
 
-# ── Persistence ────────────────────────────────────────────────────────────────
+# ââ Persistence ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
-# ── Supabase client ────────────────────────────────────────────────────────────
+# ââ Supabase client ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 _supabase: Optional[Client] = None
 
@@ -209,7 +209,7 @@ def _get_supabase() -> Optional[Client]:
             except Exception as _e:
                 print(f"[PERSIST] Supabase client init error: {_e}")
         else:
-            print("[PERSIST] SUPABASE_URL/KEY not set — persistence disabled")
+            print("[PERSIST] SUPABASE_URL/KEY not set â persistence disabled")
     return _supabase
 
 
@@ -241,10 +241,10 @@ def _load_state():
     global daily_pnl, trading_halted_today, consecutive_losses, circuit_breaker_active
     sb = _get_supabase()
     if sb is None:
-        print("[RESTORE] No Supabase client — starting fresh")
+        print("[RESTORE] No Supabase client â starting fresh")
         return
     try:
-        # ── Trade log → in-memory list ─────────────────────────────────────────
+        # ââ Trade log â in-memory list âââââââââââââââââââââââââââââââââââââââââ
         log_rows = sb.table("trade_log").select("*").eq("exchange", "MEXC").order("created_at").limit(1000).execute()
         if log_rows.data:
             for row in log_rows.data:
@@ -281,18 +281,18 @@ def _load_state():
                 })
             print(f"[RESTORE] trade log: {len(log_rows.data)} entries restored")
 
-        # ── Scanner state ──────────────────────────────────────────────────────
+        # ââ Scanner state ââââââââââââââââââââââââââââââââââââââââââââââââââââââ
         result = sb.table("scanner_state").select("*").eq("id", 2).execute()
         if not result.data:
-            print("[RESTORE] No state row found — starting fresh")
+            print("[RESTORE] No state row found â starting fresh")
             return
         data = result.data[0]
 
-        # ── New-day check ──────────────────────────────────────────────────────
+        # ââ New-day check ââââââââââââââââââââââââââââââââââââââââââââââââââââââ
         today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         if data.get("saved_date") != today_str:
             saved = data.get("saved_date", "unknown")
-            print(f"[DAILY RESET] New trading day ({saved} → {today_str}) — P&L reset to $0")
+            print(f"[DAILY RESET] New trading day ({saved} â {today_str}) â P&L reset to $0")
             daily_pnl              = 0.0
             trading_halted_today   = False
             consecutive_losses     = 0
@@ -300,21 +300,21 @@ def _load_state():
             _save_state()
             return
 
-        # ── Restore globals ────────────────────────────────────────────────────
+        # ââ Restore globals ââââââââââââââââââââââââââââââââââââââââââââââââââââ
         daily_pnl              = float(data.get("daily_pnl") or 0)
         trading_halted_today   = bool(data.get("trading_halted_today", False))
         consecutive_losses     = int(data.get("consecutive_losses") or 0)
         circuit_breaker_active = bool(data.get("circuit_breaker_active", False))
         app_state.margin_deployed = float(data.get("margin_deployed") or 0)
 
-        # ── Restore open trades ────────────────────────────────────────────────
+        # ââ Restore open trades ââââââââââââââââââââââââââââââââââââââââââââââââ
         for key, trade in (data.get("open_trades") or {}).items():
             app_state.open_trades[key] = trade
             print(f"[RESTORE] {trade.get('symbol')} {trade.get('direction')} "
                   f"entry={trade.get('entry_price')} sl={trade.get('sl_price')} "
                   f"tp1={trade.get('tp1_price')} restored")
 
-        # ── Restore cooldowns (filter expired) ────────────────────────────────
+        # ââ Restore cooldowns (filter expired) ââââââââââââââââââââââââââââââââ
         now     = time.time()
         dropped = 0
         for key, expiry in (data.get("cooldowns") or {}).items():
@@ -322,16 +322,16 @@ def _load_state():
                 _scanner_mod._cooldowns[key] = float(expiry)
             else:
                 dropped += 1
-                print(f"[RESTORE] cooldown {key} expired — dropped")
+                print(f"[RESTORE] cooldown {key} expired â dropped")
         if dropped:
             print(f"[RESTORE] {dropped} expired cooldown(s) dropped")
 
-        print(f"[RESTORE] complete — trades={len(app_state.open_trades)} "
+        print(f"[RESTORE] complete â trades={len(app_state.open_trades)} "
               f"daily_pnl=${daily_pnl:.2f} cooldowns={len(_scanner_mod._cooldowns)} "
               f"cb={consecutive_losses}/{CONSECUTIVE_LOSS_STOP}")
 
     except Exception as _e:
-        print(f"[RESTORE] Error: {_e} — starting fresh")
+        print(f"[RESTORE] Error: {_e} â starting fresh")
 
 
 def _update_daily_pnl(pnl: float):
@@ -339,7 +339,7 @@ def _update_daily_pnl(pnl: float):
     daily_pnl = round(daily_pnl + pnl, 2)
     if not trading_halted_today and daily_pnl <= DAILY_LOSS_LIMIT:
         trading_halted_today = True
-        print(f"[DAILY LIMIT] daily_pnl=${daily_pnl:.2f} — trading halted")
+        print(f"[DAILY LIMIT] daily_pnl=${daily_pnl:.2f} â trading halted")
     _save_state()
 
 
@@ -350,7 +350,7 @@ def _on_trade_close(reason: str):
         print(f"[CIRCUIT BREAKER] consecutive_losses={consecutive_losses}/{CONSECUTIVE_LOSS_STOP}")
         if consecutive_losses >= CONSECUTIVE_LOSS_STOP and not circuit_breaker_active:
             circuit_breaker_active = True
-            print("[CIRCUIT BREAKER] ACTIVE — auto-entry paused")
+            print("[CIRCUIT BREAKER] ACTIVE â auto-entry paused")
     else:
         consecutive_losses = 0
     _save_state()
@@ -360,7 +360,7 @@ def _append_trade_log(trade: dict, exit_price: float, reason: str, pnl: float, r
     now_ts    = int(time.time())
     opened_at = trade.get("opened_at", now_ts)
 
-    # ── In-memory entry (powers the LOG tab + CSV export) ─────────────────────
+    # ââ In-memory entry (powers the LOG tab + CSV export) âââââââââââââââââââââ
     entry = {
         "timestamp_opened": opened_at,
         "timestamp_closed": now_ts,
@@ -383,7 +383,7 @@ def _append_trade_log(trade: dict, exit_price: float, reason: str, pnl: float, r
     }
     app_state.trade_log.append(entry)
 
-    # ── Supabase insert ────────────────────────────────────────────────────────
+    # ââ Supabase insert ââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
     sb = _get_supabase()
     if sb is not None:
         try:
@@ -412,7 +412,7 @@ def _append_trade_log(trade: dict, exit_price: float, reason: str, pnl: float, r
 
 
 
-# ── Paper trade Supabase logging ─────────────────────────────────────────────
+# ââ Paper trade Supabase logging âââââââââââââââââââââââââââââââââââââââââââââ
 
 async def _save_paper_trade(trade: dict, alert: dict):
     """Insert a row into bounce_paper_trades when a paper trade opens."""
@@ -562,14 +562,14 @@ async def _do_open_trade(
     return trade, None
 
 
-# ━━ Telegram alerting ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# ââ Telegram alerting ââââââââââââââââââââââââââââââââââââââââââââ
 
 _TREND_EMOJI = {
-    "Strong Bull": "🚀",
-    "Bullish":     "📈",
-    "Neutral":     "➡️",
-    "Bearish":     "📉",
-    "Strong Bear": "🔻",
+    "Strong Bull": "ð",
+    "Bullish":     "ð",
+    "Neutral":     "â¡ï¸",
+    "Bearish":     "ð",
+    "Strong Bear": "ð»",
 }
 
 
@@ -580,7 +580,7 @@ def _fmt_p(v: float) -> str:
 
 
 def _tg_post(msg: str) -> None:
-    """POST to Telegram in a daemon thread — never blocks the scan loop."""
+    """POST to Telegram in a daemon thread â never blocks the scan loop."""
     def _send(text: str, parse_mode: str) -> None:
         url  = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
         data = {"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": parse_mode}
@@ -589,7 +589,7 @@ def _tg_post(msg: str) -> None:
         except Exception as _e:
             print(f"[TG] send error: {_e}")
 
-    full_msg = "🟠 MEXC BOUNCE\n" + msg
+    full_msg = "ð  MEXC BOUNCE\n" + msg
     def _worker() -> None:
         try:
             _send(full_msg, "HTML")
@@ -621,17 +621,17 @@ def send_telegram(alert: dict) -> None:
     tp2       = float(alert.get("tp2_price", 0) or 0)
     leverage  = int(alert.get("leverage", 5) or 5)
     margin    = float(alert.get("margin", MARGIN_PER_TRADE) or MARGIN_PER_TRADE)
-    session   = alert.get("session", "—") or "—"
+    session   = alert.get("session", "â") or "â"
 
-    tier_map    = {"HIGH_PROB": "✦ HIGH PROB", "STRONG": "◆ STRONG"}
-    tier_label  = tier_map.get(tier, "● REGULAR")
-    trend_emoji = _TREND_EMOJI.get(trend, "➡️")
+    tier_map    = {"HIGH_PROB": "â¦ HIGH PROB", "STRONG": "â STRONG"}
+    tier_label  = tier_map.get(tier, "â REGULAR")
+    trend_emoji = _TREND_EMOJI.get(trend, "â¡ï¸")
 
     sess_lo = session.lower()
-    if "asia" in sess_lo:                          session_emoji = "🌏"
-    elif "london" in sess_lo:                      session_emoji = "🌍"
-    elif "ny" in sess_lo or "new york" in sess_lo: session_emoji = "🌎"
-    else:                                          session_emoji = "🌑"
+    if "asia" in sess_lo:                          session_emoji = "ð"
+    elif "london" in sess_lo:                      session_emoji = "ð"
+    elif "ny" in sess_lo or "new york" in sess_lo: session_emoji = "ð"
+    else:                                          session_emoji = "ð"
 
     is_long  = direction == "LONG"
     size     = (margin * leverage / entry) if entry else 0
@@ -648,15 +648,15 @@ def send_telegram(alert: dict) -> None:
     ts       = datetime.now(_EDT).strftime("%Y-%m-%d %H:%M EDT")
 
     parts = [
-        f"<b>{tier_label} {direction} — {sym}</b>",
+        f"<b>{tier_label} {direction} â {sym}</b>",
         f"Score: {score}/4",
         f"Trend: {trend_emoji} {trend}",
         f"J15M: {j15m:.1f}",
         f"J1H: {j1h:.1f}",
-        "📊 ADX: " + f"{adx:.1f} — {adx_lbl}",
+        "ð ADX: " + f"{adx:.1f} â {adx_lbl}",
         f"Depth: B{bid_pct:.0f}% / S{ask_pct:.0f}%",
         f"Session: {session_emoji} {session} +0",
-        "━━━ ORDER SETUP ━━━",
+        "âââ ORDER SETUP âââ",
         f"Direction:   {dir_lbl}",
         f"Entry:       {_fmt_p(entry)}",
         f"Cost:        {margin:.0f} USDT",
@@ -664,13 +664,13 @@ def send_telegram(alert: dict) -> None:
         f"TP1:         {_fmt_p(tp1)}",
         f"TP2:         {_fmt_p(tp2)}",
         f"SL:          {_fmt_p(sl)}",
-        "━━━ RISK SUMMARY ━━━",
+        "âââ RISK SUMMARY âââ",
         "Est. Profit TP1: $" + f"{tp1_pnl:.2f}" + " net",
         "Est. Profit TP2: $" + f"{tp2_pnl:.2f}" + " net",
         "Max Loss:        $" + f"{sl_pnl:.2f}"  + " net",
         f"R:R:             1:{rr}",
         f"Liq Price:       ~{_fmt_p(liq)}",
-        "⏱ " + ts,
+        "â± " + ts,
     ]
     _tg_post("\n".join(parts))
 
@@ -697,7 +697,7 @@ def send_reminder(alert: dict, cancel_event: threading.Event) -> None:
     key        = f"{sym}{direction}"
 
     if key in app_state.open_trades:
-        status = "✅ ACTIVE"
+        status = "â ACTIVE"
     else:
         closed = next(
             (e for e in reversed(app_state.trade_log)
@@ -706,27 +706,27 @@ def send_reminder(alert: dict, cancel_event: threading.Event) -> None:
         if closed:
             reason = closed.get("exit_reason", "")
             if reason == "SL":
-                status = "🔴 SL Breached"
+                status = "ð´ SL Breached"
             elif reason in ("TP2", "HC_PARTIAL_1.5R"):
-                status = "✅ TP2 Reached"
+                status = "â TP2 Reached"
             else:
                 status = "Closed (" + reason + ")"
         else:
-            status = "✅ ACTIVE"
+            status = "â ACTIVE"
 
     ts  = datetime.now(_EDT).strftime("%Y-%m-%d %H:%M EDT")
     msg = (
-        "⏰ REMINDER — " + sym + " " + direction + "\n"
+        "â° REMINDER â " + sym + " " + direction + "\n"
         "Alert sent 30 min ago at " + orig_time + "\n"
         "Current price: " + _fmt_p(live_price) + "\n"
         "SL: " + _fmt_p(sl) + " | TP1: " + _fmt_p(tp1) + " | TP2: " + _fmt_p(tp2) + "\n"
         "Status: " + status + "\n"
-        "⏱ " + ts
+        "â± " + ts
     )
     _tg_post(msg)
 
 
-# ── Background loops ──────────────────────────────────────────────────────────
+# ââ Background loops ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 async def _scan_loop():
     await asyncio.sleep(3)
@@ -789,13 +789,13 @@ async def _scan_loop():
                         f"[SIGNAL] {sym} {dir_} tier={alert.get('tier')} "
                         f"lev={alert.get('leverage')}x entry={alert.get('entry_price')} "
                         f"sl={alert.get('sl_price')} tp1={alert.get('tp1_price')} "
-                        f"— live manual entry required via overlay. "
+                        f"â live manual entry required via overlay. "
                         f"Do not open position automatically."
                     )
                 else:
                     if not PAPER_MODE:
                         print(
-                            "[WARNING] LIVE AUTO-ENTRY ACTIVE — "
+                            "[WARNING] LIVE AUTO-ENTRY ACTIVE â "
                             "LIVE_MANUAL_ENTRY_ONLY is disabled."
                         )
                     _margin = alert.get("margin", MARGIN_PER_TRADE)
@@ -838,14 +838,14 @@ async def _price_loop():
                 daily_pnl            = 0.0
                 trading_halted_today = False
                 _last_midnight_day   = today
-                print("[DAILY RESET] midnight UTC — daily_pnl reset")
+                print("[DAILY RESET] midnight UTC â daily_pnl reset")
 
         except Exception as e:
             print(f"[PRICE LOOP] error: {e}")
         await asyncio.sleep(PRICE_INTERVAL_SECONDS)
 
 
-# ── Exit monitor helpers ───────────────────────────────────────────────────────
+# ââ Exit monitor helpers âââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 def _compute_r(pnl: float, trade: dict) -> float:
     entry       = trade.get("entry_price") or 0
@@ -858,6 +858,10 @@ def _compute_r(pnl: float, trade: dict) -> float:
 
 def _do_hc_partial_close(key: str, trade: dict, exit_price: float):
     """HC Score-10: close 1/3 at 1.5R, move SL to entry (breakeven)."""
+    if not exit_price or exit_price <= 0:
+        print(f"[EXIT GUARD] {trade.get('symbol')} {trade.get('direction')} — "
+              f"refused HC partial close: exit_price={exit_price!r} is null/zero — skipping")
+        return
     sym, direction = trade["symbol"], trade["direction"]
     full_size = trade.get("remaining_size", trade["size"])
     close_sz  = full_size / 3
@@ -875,12 +879,16 @@ def _do_hc_partial_close(key: str, trade: dict, exit_price: float):
     app_state.open_trades[key]    = trade
     app_state.margin_deployed     = max(0.0, app_state.margin_deployed - old_margin / 3)
     print(f"[HC PARTIAL] {sym} {direction} 1/3 closed at {exit_price:.6f} "
-          f"pnl=${pnl:.2f} r={r:+.2f}R — SL moved to breakeven {entry:.6f}")
+          f"pnl=${pnl:.2f} r={r:+.2f}R â SL moved to breakeven {entry:.6f}")
     _save_state()
 
 
 def _do_close_trade(key: str, trade: dict, exit_price: float, reason: str):
-    """Synchronous internal close — no exchange call, price already known."""
+    """Synchronous internal close â no exchange call, price already known."""
+    if not exit_price or exit_price <= 0:
+        print(f"[EXIT GUARD] {trade.get('symbol')} {trade.get('direction')} — "
+              f"refused close (reason={reason}): exit_price={exit_price!r} is null/zero — skipping")
+        return
     sym       = trade["symbol"]
     direction = trade["direction"]
     remaining = trade.get("remaining_size", trade["size"])
@@ -905,11 +913,11 @@ def _do_close_trade(key: str, trade: dict, exit_price: float, reason: str):
     if TELEGRAM_ENABLED:
         def _exit_tg(r=reason, s=sym, d=direction, ep=exit_price, p=pnl):
             if r == "SL":
-                _tg_post("🔴 EXIT — " + s + " " + d + " — SL hit at " + _fmt_p(ep) + ". Final P&L: $" + f"{p:.2f}")
+                _tg_post("ð´ EXIT â " + s + " " + d + " â SL hit at " + _fmt_p(ep) + ". Final P&L: $" + f"{p:.2f}")
             elif r == "TP2":
-                _tg_post("✅ TP2 HIT — " + s + " " + d + " — full close at " + _fmt_p(ep) + ". Final P&L: $" + f"{p:.2f}")
+                _tg_post("â TP2 HIT â " + s + " " + d + " â full close at " + _fmt_p(ep) + ". Final P&L: $" + f"{p:.2f}")
             else:
-                _tg_post("📋 EXIT (" + r + ") — " + s + " " + d + " — closed at " + _fmt_p(ep) + ". P&L: $" + f"{p:.2f}")
+                _tg_post("ð EXIT (" + r + ") â " + s + " " + d + " â closed at " + _fmt_p(ep) + ". P&L: $" + f"{p:.2f}")
         threading.Thread(target=_exit_tg, daemon=True).start()
     if PAPER_MODE:
         asyncio.create_task(_update_paper_trade_close(trade, exit_price, reason, pnl))
@@ -918,6 +926,10 @@ def _do_close_trade(key: str, trade: dict, exit_price: float, reason: str):
 
 def _do_partial_close_tp1(key: str, trade: dict, exit_price: float):
     """Close half the position at TP1, keep remainder open watching for TP2."""
+    if not exit_price or exit_price <= 0:
+        print(f"[EXIT GUARD] {trade.get('symbol')} {trade.get('direction')} — "
+              f"refused TP1 close: exit_price={exit_price!r} is null/zero — skipping")
+        return
     sym       = trade["symbol"]
     direction = trade["direction"]
     full_size = trade.get("remaining_size", trade["size"])
@@ -932,7 +944,7 @@ def _do_partial_close_tp1(key: str, trade: dict, exit_price: float):
     _append_trade_log(trade, exit_price, "TP1", pnl, r)
     _update_daily_pnl(pnl)
 
-    # Update trade in-place — keep it open for TP2 watch
+    # Update trade in-place â keep it open for TP2 watch
     trade["remaining_size"] = half_size
     trade["tp1_hit"]        = True
     trade["extreme_price"]  = exit_price
@@ -943,15 +955,15 @@ def _do_partial_close_tp1(key: str, trade: dict, exit_price: float):
     app_state.margin_deployed      = max(0.0, app_state.margin_deployed - old_margin / 2)
 
     print(f"[EXIT] {sym} {direction} TP1 partial close at {exit_price} "
-          f"half_pnl=${pnl:.2f} r={r:+.2f}R — remainder open watching TP2")
+          f"half_pnl=${pnl:.2f} r={r:+.2f}R â remainder open watching TP2")
     if TELEGRAM_ENABLED:
         def _tp1_tg(s=sym, d=direction, ep=exit_price, p=pnl):
-            _tg_post("✅ TP1 HIT — " + s + " " + d + " — partial close at " + _fmt_p(ep) + ". P&L so far: $" + f"{p:.2f}")
+            _tg_post("â TP1 HIT â " + s + " " + d + " â partial close at " + _fmt_p(ep) + ". P&L so far: $" + f"{p:.2f}")
         threading.Thread(target=_tp1_tg, daemon=True).start()
     _save_state()
 
 
-# ── Exit monitor loop ──────────────────────────────────────────────────────────
+# ââ Exit monitor loop ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 async def _exit_monitor_loop():
     """Runs every PRICE_INTERVAL_SECONDS. Checks every open trade against SL/TP."""
@@ -967,16 +979,16 @@ async def _exit_monitor_loop():
                 tp1_hit   = trade.get("tp1_hit", False)
                 is_short  = direction == "SHORT"
 
-                if current is None or not sl_price:
+                if not current or current <= 0 or not sl_price:
                     print(f"[EXIT CHECK] {sym} {direction} skipped — "
-                          f"no price ({current}) or no sl ({sl_price})")
+                          f"price={current!r} is null/zero or no sl ({sl_price}) — waiting")
                     continue
 
                 # Track extreme price (lowest for SHORT, highest for LONG)
                 ep = trade.get("extreme_price") or current
                 trade["extreme_price"] = min(ep, current) if is_short else max(ep, current)
 
-                # ── SL breach ──────────────────────────────────────────────────
+                # ââ SL breach ââââââââââââââââââââââââââââââââââââââââââââââââââ
                 # SHORT: SL triggers when price RISES above sl_price
                 # LONG : SL triggers when price FALLS below sl_price
                 sl_breached = (is_short and current >= sl_price) or \
@@ -984,11 +996,11 @@ async def _exit_monitor_loop():
 
                 if sl_breached:
                     print(f"[EXIT CHECK] {sym} {direction} price={current} "
-                          f"sl={sl_price} tp1={tp1_price} → SL BREACHED → closing")
+                          f"sl={sl_price} tp1={tp1_price} â SL BREACHED â closing")
                     _do_close_trade(key, trade, current, "SL")
                     continue
 
-                # ── HC early partial close at 1.5R → SL to breakeven ────────────
+                # ââ HC early partial close at 1.5R â SL to breakeven ââââââââââââ
                 if (trade.get("is_score10") and not trade.get("partial_hit")
                         and trade.get("partial_price")):
                     _pp     = trade["partial_price"]
@@ -997,24 +1009,24 @@ async def _exit_monitor_loop():
                         _do_hc_partial_close(key, trade, current)
                         continue
 
-                # ── TP1 (always checked first — partial close, half position) ────
+                # ââ TP1 (always checked first â partial close, half position) ââââ
                 if not tp1_hit and tp1_price:
                     tp1_reached = (is_short and current <= tp1_price) or \
                                   (not is_short and current >= tp1_price)
                     print(f"[EXIT CHECK] {sym} {direction} price={current} "
-                          f"tp1={tp1_price} tp1_hit={tp1_hit} → "
-                          f"{'TP1 TRIGGERED → partial close' if tp1_reached else 'watching tp1'}")
+                          f"tp1={tp1_price} tp1_hit={tp1_hit} â "
+                          f"{'TP1 TRIGGERED â partial close' if tp1_reached else 'watching tp1'}")
                     if tp1_reached:
                         _do_partial_close_tp1(key, trade, current)
                         continue
 
-                # ── TP2 (only after tp1_hit=True — closes remainder) ──────────
+                # ââ TP2 (only after tp1_hit=True â closes remainder) ââââââââââ
                 if tp1_hit and tp2_price:
                     tp2_reached = (is_short and current <= tp2_price) or \
                                   (not is_short and current >= tp2_price)
                     print(f"[EXIT CHECK] {sym} {direction} price={current} "
-                          f"tp2={tp2_price} tp1_hit={tp1_hit} → "
-                          f"{'TP2 TRIGGERED → full close remainder' if tp2_reached else 'watching tp2'}")
+                          f"tp2={tp2_price} tp1_hit={tp1_hit} â "
+                          f"{'TP2 TRIGGERED â full close remainder' if tp2_reached else 'watching tp2'}")
                     if tp2_reached:
                         _do_close_trade(key, trade, current, "TP2")
                         continue
@@ -1035,7 +1047,7 @@ async def _exit_monitor_loop():
 
                 # No exit this cycle
                 print(f"[EXIT CHECK] {sym} {direction} price={current} "
-                      f"sl={sl_price} tp1={tp1_price} tp2={tp2_price} → no exit")
+                      f"sl={sl_price} tp1={tp1_price} tp2={tp2_price} â no exit")
 
         except Exception as e:
             print(f"[EXIT MONITOR] error: {e}")
@@ -1043,7 +1055,7 @@ async def _exit_monitor_loop():
         await asyncio.sleep(PRICE_INTERVAL_SECONDS)
 
 
-# ── Lifespan ──────────────────────────────────────────────────────────────────
+# ââ Lifespan ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -1052,13 +1064,13 @@ async def lifespan(app: FastAPI):
     log_startup_config()
     _load_state()
 
-    # ── Mode log ──────────────────────────────────────────────────────────────
+    # ââ Mode log ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
     if PAPER_MODE:
-        print("[MODE] PAPER trading — auto-entry enabled")
+        print("[MODE] PAPER trading â auto-entry enabled")
     elif LIVE_MANUAL_ENTRY_ONLY:
-        print("[MODE] LIVE trading — manual entry only via overlay. Auto-entry blocked.")
+        print("[MODE] LIVE trading â manual entry only via overlay. Auto-entry blocked.")
     else:
-        print("[MODE] LIVE trading — AUTO-ENTRY ACTIVE. All signals will open live positions automatically. Confirm this is intentional.")
+        print("[MODE] LIVE trading â AUTO-ENTRY ACTIVE. All signals will open live positions automatically. Confirm this is intentional.")
 
     scan_task  = asyncio.create_task(_scan_loop())
     price_task = asyncio.create_task(_price_loop())
@@ -1075,7 +1087,7 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
 
-# ── Routes ────────────────────────────────────────────────────────────────────
+# ââ Routes ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
@@ -1101,7 +1113,7 @@ async def get_account():
     }
 
 
-# ── Per-pair overlay endpoint ─────────────────────────────────────────────────
+# ââ Per-pair overlay endpoint âââââââââââââââââââââââââââââââââââââââââââââââââ
 
 @app.get("/api/pair/{symbol}")
 async def get_pair(symbol: str):
@@ -1204,7 +1216,7 @@ async def get_pair(symbol: str):
     }
 
 
-# ── Trade open ────────────────────────────────────────────────────────────────
+# ââ Trade open ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 class OpenTradeRequest(BaseModel):
     symbol:      str
@@ -1217,7 +1229,7 @@ class OpenTradeRequest(BaseModel):
 
 @app.post("/api/trade/open")
 async def open_trade(req: OpenTradeRequest):
-    # Manual entry via overlay — always permitted regardless of LIVE_MANUAL_ENTRY_ONLY setting.
+    # Manual entry via overlay â always permitted regardless of LIVE_MANUAL_ENTRY_ONLY setting.
     alert_data = None
     for a in app_state.alerts:
         if a["symbol"] == req.symbol and a["direction"] == req.direction:
@@ -1240,7 +1252,7 @@ async def open_trade(req: OpenTradeRequest):
     return {"status": "ok", "trade": trade}
 
 
-# ── Trade close ───────────────────────────────────────────────────────────────
+# ââ Trade close âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 class CloseTradeRequest(BaseModel):
     symbol:    str
@@ -1287,7 +1299,7 @@ async def close_trade(req: CloseTradeRequest):
     return {"status": "ok", "closed": closed}
 
 
-# ── Circuit breaker ───────────────────────────────────────────────────────────
+# ââ Circuit breaker âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 @app.post("/api/circuit-breaker/reset")
 async def reset_circuit_breaker():
@@ -1298,7 +1310,7 @@ async def reset_circuit_breaker():
     return {"status": "ok", "circuit_breaker_active": False, "consecutive_losses": 0}
 
 
-# ── Daily reset ───────────────────────────────────────────────────────────────
+# ââ Daily reset âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 @app.post("/api/reset-day")
 async def reset_day():
@@ -1309,7 +1321,7 @@ async def reset_day():
     return {"status": "ok"}
 
 
-# ── Trade log ─────────────────────────────────────────────────────────────────
+# ââ Trade log âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 @app.get("/api/tradelog")
 async def get_tradelog():
@@ -1381,7 +1393,7 @@ async def clear_tradelog():
     clear_all_scanner_state()
 
 
-    # Delete only MEXC rows from Supabase trade_log — never touches HL data
+    # Delete only MEXC rows from Supabase trade_log â never touches HL data
     _sb = _get_supabase()
     if _sb is not None:
         try:

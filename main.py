@@ -51,6 +51,7 @@ TELEGRAM_BOT_TOKEN  = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID    = int(os.environ.get("TELEGRAM_CHAT_ID", "0") or "0")
 TELEGRAM_ENABLED    = os.environ.get("TELEGRAM_ENABLED", "true").lower() == "true"
 _pending_reminders: dict = {}
+_stale_tg_sent: set[str] = set()  # symbols for which stale-price TG alert was already sent
 
 # ââ Global safety state ââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 consecutive_losses:     int   = 0
@@ -75,6 +76,7 @@ class AppState:
         self.last_scan_at:         Optional[int]     = None
         self.scan_snapshots:       dict              = {}  # symbol -> last 3 scan snapshots
         self.market_health:        dict              = {}
+        self.price_stale:          dict[str, bool]   = {}  # symbols with stale price feed
 
     @property
     def slots_used(self) -> int:
@@ -733,6 +735,7 @@ async def _scan_loop():
     while True:
         try:
             new_alerts = await run_full_scan(mexc_client, market_health=app_state.market_health)
+            _check_stale_prices()
             app_state.last_scan_at = int(time.time())
             app_state.pair_states  = await scan_pair_state(mexc_client)
             app_state.market_health = compute_market_health(
@@ -844,6 +847,30 @@ async def _price_loop():
             print(f"[PRICE LOOP] error: {e}")
         await asyncio.sleep(PRICE_INTERVAL_SECONDS)
 
+
+def _check_stale_prices() -> None:
+    """Send a one-shot Telegram alert when a pair with an open trade loses price data."""
+    global _stale_tg_sent
+    stale: set[str] = set(_scanner_mod._stale_prices)
+
+    for sym in stale:
+        app_state.price_stale[sym] = True
+        has_trade = any(t.get("symbol") == sym for t in app_state.open_trades.values())
+        if has_trade and sym not in _stale_tg_sent:
+            _stale_tg_sent.add(sym)
+            msg = (
+                f"⚠️ PRICE STALE — {sym} — "
+                f"no price for 2 consecutive scans. "
+                f"Open trade at risk. Check manually."
+            )
+            print(f"[PRICE STALE] {sym} — Telegram alert sent")
+            if TELEGRAM_ENABLED:
+                threading.Thread(target=lambda m=msg: _tg_post(m), daemon=True).start()
+
+    for sym in list(_stale_tg_sent):
+        if sym not in stale:
+            _stale_tg_sent.discard(sym)
+            app_state.price_stale.pop(sym, None)
 
 # ââ Exit monitor helpers âââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 

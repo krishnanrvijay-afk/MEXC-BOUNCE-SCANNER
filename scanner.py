@@ -64,33 +64,33 @@ def _compute_rsi(candles: list[dict], period: int = 14) -> float:
     return 100 - 100 / (1 + avg_g / avg_l)
 
 
-  def _compute_stoch(candles: list[dict], period: int = 14, smooth_k: int = 3, smooth_d: int = 3) -> tuple[float, float, float, float]:
-      """Slow stochastic 14,3,3 → (k, d, k_prev, d_prev)."""
-      closes = [c["close"] for c in candles]
-      highs  = [c["high"]  for c in candles]
-      lows   = [c["low"]   for c in candles]
-      if len(closes) < period + smooth_k + smooth_d - 1:
-          return 50.0, 50.0, 50.0, 50.0
-      raw_k: list[float] = []
-      for i in range(period - 1, len(closes)):
-          h_n = max(highs[i - period + 1 : i + 1])
-          l_n = min(lows[i  - period + 1 : i + 1])
-          raw_k.append((closes[i] - l_n) / (h_n - l_n) * 100 if h_n != l_n else 50.0)
-      slow_k: list[float] = []
-      for i in range(smooth_k - 1, len(raw_k)):
-          slow_k.append(sum(raw_k[i - smooth_k + 1 : i + 1]) / smooth_k)
-      if len(slow_k) < smooth_d + 1:
-          return 50.0, 50.0, 50.0, 50.0
-      slow_d: list[float] = []
-      for i in range(smooth_d - 1, len(slow_k)):
-          slow_d.append(sum(slow_k[i - smooth_d + 1 : i + 1]) / smooth_d)
-      k      = slow_k[-1]
-      d      = slow_d[-1]
-      k_prev = slow_k[-2] if len(slow_k) >= 2 else k
-      d_prev = slow_d[-2] if len(slow_d) >= 2 else d
-      return k, d, k_prev, d_prev
+def _compute_stoch(candles: list[dict], period: int = 14, smooth_k: int = 3, smooth_d: int = 3) -> tuple[float, float, float, float]:
+    """Slow stochastic 14,3,3 → (k, d, k_prev, d_prev)."""
+    closes = [c["close"] for c in candles]
+    highs  = [c["high"]  for c in candles]
+    lows   = [c["low"]   for c in candles]
+    if len(closes) < period + smooth_k + smooth_d - 1:
+        return 50.0, 50.0, 50.0, 50.0
+    raw_k: list[float] = []
+    for i in range(period - 1, len(closes)):
+        h_n = max(highs[i - period + 1 : i + 1])
+        l_n = min(lows[i  - period + 1 : i + 1])
+        raw_k.append((closes[i] - l_n) / (h_n - l_n) * 100 if h_n != l_n else 50.0)
+    slow_k: list[float] = []
+    for i in range(smooth_k - 1, len(raw_k)):
+        slow_k.append(sum(raw_k[i - smooth_k + 1 : i + 1]) / smooth_k)
+    if len(slow_k) < smooth_d + 1:
+        return 50.0, 50.0, 50.0, 50.0
+    slow_d: list[float] = []
+    for i in range(smooth_d - 1, len(slow_k)):
+        slow_d.append(sum(slow_k[i - smooth_d + 1 : i + 1]) / smooth_d)
+    k      = slow_k[-1]
+    d      = slow_d[-1]
+    k_prev = slow_k[-2] if len(slow_k) >= 2 else k
+    d_prev = slow_d[-2] if len(slow_d) >= 2 else d
+    return k, d, k_prev, d_prev
 
-  
+
 def _compute_atr(candles: list[dict], period: int = 14) -> float:
     if len(candles) < 2:
         return 0.0

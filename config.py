@@ -32,9 +32,11 @@ RSI15M_LONG_MAX  = 40
 DEPTH_GATE_PCT   = 55
 
 ATR_SL_MULTIPLIER = 1.0
+TP1_CLOSE_PCT       = 0.70   # close 70% at TP1; 30% runner goes to TRAILBLAZER
+TRAIL_ATR_MULTIPLIER = 0.5    # trail stop distance = atr15m × this multiplier
 
 TP1_R = 1.0
-TP2_R = 1.5
+# TP2_R = 1.5  # unused — replaced by TRAILBLAZER ATR trail
 
 LEVERAGE_HIGH = 10
 LEVERAGE_MID  = 7

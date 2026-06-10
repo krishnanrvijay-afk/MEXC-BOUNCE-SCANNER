@@ -185,7 +185,10 @@ function renderHeader() {
   pnlEl.textContent = `$${(daily?.pnl || 0).toFixed(2)}`;
   pnlEl.className   = 'hstat-value ' + ((daily?.pnl || 0) >= 0 ? 'green' : 'red');
 
-  document.getElementById('h-margin').textContent    = `$${Math.round(account?.margin_deployed || 0).toLocaleString()}`;
+  const unrealPnl = account?.unrealized_pnl || 0;
+    const unrealEl  = document.getElementById('h-margin');
+    unrealEl.textContent = (unrealPnl >= 0 ? '+' : '') + '$' + Math.abs(unrealPnl).toFixed(2);
+    unrealEl.className   = 'hstat-value ' + (unrealPnl > 0 ? 'green' : unrealPnl < 0 ? 'red' : '');
   document.getElementById('h-positions').textContent = account?.slots_used || 0;
   document.getElementById('h-scans').textContent     = scan_count || 0;
 
@@ -279,8 +282,8 @@ function buildCard(p, alerts, trades, changes) {
                  : '#ffffff';
 
   // Gate counts
-  const shortGates = [j15m > 80, j1h > 60, stochK > 75 && stochKPrev >= stochDPrev && stochK < stochD, askPct >= 55];
-  const longGates  = [j15m < 20, j1h < 40, stochK < 25 && stochKPrev <= stochDPrev && stochK > stochD, bidPct >= 55];
+  const shortGates = [j15m > 80, j1h > 60, stochK > 75 && stochK < stochD, askPct >= 55];
+  const longGates  = [j15m < 20, j1h < 40, stochK < 25 && stochK > stochD, bidPct >= 55];
   const shortCount = shortGates.filter(Boolean).length;
   const longCount  = longGates.filter(Boolean).length;
   const shortFull  = shortCount === 4;
@@ -737,6 +740,8 @@ function buildPosCard(t, prices, pairStates) {
   const tp2      = t.tp2_price     || 0;
   const be       = t.be_price      || (isLong ? entry * 1.001 : entry * 0.999);
   const tp1Hit   = !!t.tp1_hit;
+  const trailStop = t.trailing_sl || t.trail_stop || 0;
+  const trailBest = t.trail_best_price || t.extreme_price || 0;
   const pnl      = t.unrealized_pnl || 0;
   const r        = t.r              || 0;
   const score    = t.score          || 0;
@@ -875,11 +880,22 @@ function buildPosCard(t, prices, pairStates) {
         <span class="pcv2-mck" style="background:#00ff88"></span>
         <span class="pcv2-mkb" style="color:#00ff88">+$${pnlTp1.toFixed(0)}</span>
       </div>` : ''}
-      ${tp2 ? `<div class="pcv2-mk" style="left:${pTp2.toFixed(1)}%">
+      ${tp1Hit && trailStop ? `
+        <div class="pcv2-mk" style="left:${bp(trailStop).toFixed(1)}%">
+          <span class="pcv2-mkt" style="color:#ffaa00">TRAIL STOP<br>${fmtPrice(trailStop)}</span>
+          <span class="pcv2-mck" style="background:#ffaa00"></span>
+          <span class="pcv2-mkb" style="color:#ffaa00"></span>
+        </div>
+        ${trailBest && trailBest !== trailStop ? `<div class="pcv2-mk" style="left:${bp(trailBest).toFixed(1)}%">
+          <span class="pcv2-mkt" style="color:#ffdd88;border-bottom:1px dashed #ffdd88">BEST<br>${fmtPrice(trailBest)}</span>
+          <span class="pcv2-mck" style="background:transparent;border:1px dashed #ffdd88"></span>
+          <span class="pcv2-mkb"></span>
+        </div>` : ''}
+      ` : (tp2 && !tp1Hit ? `<div class="pcv2-mk" style="left:${pTp2.toFixed(1)}%">
         <span class="pcv2-mkt" style="color:#00ff88">TP2 1.5R<br>${fmtPrice(tp2)}</span>
         <span class="pcv2-mck" style="background:#00ff88"></span>
         <span class="pcv2-mkb" style="color:#00ff88">+$${pnlTp2.toFixed(0)}</span>
-      </div>` : ''}
+      </div>` : '')}
       <div class="pcv2-mk" style="left:${p2R.toFixed(1)}%">
         <span class="pcv2-mkt" style="color:#3a6644">2.0R<br>${fmtPrice(twoR)}</span>
         <span class="pcv2-mck" style="background:#3a6644"></span>
@@ -909,7 +925,7 @@ function buildPosCard(t, prices, pairStates) {
 
 function calcStats(log) {
   if (!log.length) return null;
-  var isWin  = function(r) { return r.exit_reason === "TP1" || r.exit_reason === "TP2"; };
+  var isWin  = function(r) { return r.exit_reason === "TP1" || r.exit_reason === "TP2" || r.exit_reason === "TRAILBLAZER"; };
   var isSL   = function(r) { return r.exit_reason === "SL"; };
   var wins   = log.filter(isWin);
   var losses = log.filter(isSL);
@@ -1112,7 +1128,7 @@ function _exitDotPct(r) {
 
 function _tradeVisRow(r) {
   var reason   = r.exit_reason || '';
-  var isWin    = reason === 'TP1' || reason === 'TP2';
+  var isWin    = reason === 'TP1' || reason === 'TP2' || reason === 'TRAILBLAZER';
   var isSL     = reason === 'SL';
   var badgeCls = isWin ? 'tl-badge-win' : isSL ? 'tl-badge-loss' : 'tl-badge-force';
   var badgeTxt = isWin ? 'WIN' : isSL ? 'LOSS' : 'FORCE';
@@ -1135,7 +1151,7 @@ function _tradeVisRow(r) {
 // ── Streak calculator ─────────────────────────────────────────────────────────
 function _calcStreak(log) {
   if (!log.length) return { type: null, count: 0 };
-  var isW = function(r) { return r.exit_reason === 'TP1' || r.exit_reason === 'TP2'; };
+  var isW = function(r) { return r.exit_reason === 'TP1' || r.exit_reason === 'TP2' || r.exit_reason === 'TRAILBLAZER'; };
   var cur = isW(log[log.length - 1]) ? 'W' : 'L';
   var count = 0;
   for (var i = log.length - 1; i >= 0; i--) {
@@ -1151,7 +1167,7 @@ function renderPerfPanel(log) {
   if (!el) return;
   if (!log.length) { el.innerHTML = ''; return; }
 
-  var isWin = function(r) { return r.exit_reason === 'TP1' || r.exit_reason === 'TP2'; };
+  var isWin = function(r) { return r.exit_reason === 'TP1' || r.exit_reason === 'TP2' || r.exit_reason === 'TRAILBLAZER'; };
   var isSL  = function(r) { return r.exit_reason === 'SL'; };
   var wins  = log.filter(isWin).length;
   var wr    = wins / log.length * 100;
@@ -1264,6 +1280,7 @@ function renderLogTab() {
   const rows = [...filtered].reverse().map(r => {
     const reasonCls = r.exit_reason === 'TP1'  ? 'reason-tp1'
                     : r.exit_reason === 'TP2'  ? 'reason-tp2'
+                    : r.exit_reason === 'TRAILBLAZER' ? 'reason-tp2'
                     : r.exit_reason === 'SL'   ? 'reason-sl' : 'reason-manual';
     const pnlColor = (r.pnl_usd||0) >= 0 ? '#00ff88' : '#ff4444';
     const rColor   = (r.r_value||0) >= 0 ? '#555'    : '#ff4444';
@@ -1281,7 +1298,7 @@ function renderLogTab() {
       <td>${fmtPrice(r.exit_price)}</td>
       <td style="color:#ff4444;">${fmtPrice(r.sl_price)}</td>
       <td style="color:#00ff88;">${fmtPrice(r.tp1_price)}</td>
-      <td class="${reasonCls}">${r.exit_reason||'—'}</td>
+      <td class="${reasonCls}">${r.exit_reason === 'TRAILBLAZER' ? '🏃 TRAILBLAZER' : (r.exit_reason||'—')}</td>
       <td style="color:${pnlColor};font-weight:700;">${(r.pnl_usd||0)>=0?'+':''}${(r.pnl_usd||0).toFixed(2)}</td>
       <td style="color:${rColor};font-weight:700;">${(r.r_value||0)>=0?'+':''}${(r.r_value||0).toFixed(2)}R</td>
       <td style="color:#555;">${openTime}</td>
@@ -1522,6 +1539,9 @@ function _ovRulerHtml(d, dir) {
   const ep   = src.entry_price;
   const tp1  = src.tp1_price;
   const tp2  = src.tp2_price;
+  const tp1Hit2   = !!(src.tp1_hit);
+  const trailStop2 = src.trail_stop || src.trailing_sl || 0;
+  const trailBest2 = src.trail_best_price || 0;
   const cur  = d.price || ep;
   const slD  = Math.abs(ep - sl);
   const tp2R = tp2 || (dir === 'LONG' ? ep + slD * 2 : ep - slD * 2);
@@ -1538,11 +1558,16 @@ function _ovRulerHtml(d, dir) {
   const pfW   = dir === 'LONG' ? (tp2R ? pct(tp2R) - epP : 0) : epP - (tp2R ? pct(tp2R) : epP);
   let marks = `<div class="pov-rm pov-rm-ep" style="left:${epP.toFixed(1)}%"></div>`;
   if (tp1)  marks += `<div class="pov-rm pov-rm-tp1" style="left:${pct(tp1).toFixed(1)}%"></div>`;
-  if (tp2R) marks += `<div class="pov-rm pov-rm-tp2" style="left:${pct(tp2R).toFixed(1)}%"></div>`;
+  if (tp1Hit2 && trailStop2) {
+    marks += `<div class="pov-rm" style="left:${pct(trailStop2).toFixed(1)}%;background:#ffaa00;width:3px;height:100%"></div>`;
+    if (trailBest2) marks += `<div class="pov-rm" style="left:${pct(trailBest2).toFixed(1)}%;background:transparent;border-left:2px dashed #ffdd88;height:100%"></div>`;
+  } else if (tp2R) {
+    marks += `<div class="pov-rm pov-rm-tp2" style="left:${pct(tp2R).toFixed(1)}%"></div>`;
+  }
   return `<div class="pov-ruler-hdr">
     <span style="color:#ff3d57">SL ${fmtPrice(sl)}</span>
     ${tp1 ? `<span style="color:#66aaff">TP1 ${fmtPrice(tp1)}</span>` : ''}
-    ${tp2R ? `<span style="color:#00e676">TP2 ${fmtPrice(tp2R)}</span>` : ''}
+    ${tp1Hit2 && trailStop2 ? `<span style="color:#ffaa00">TRAIL ${fmtPrice(trailStop2)}</span>${trailBest2 ? ` <span style="color:#ffdd88">BEST ${fmtPrice(trailBest2)}</span>` : ''}` : (tp2R ? `<span style="color:#00e676">TP2 ${fmtPrice(tp2R)}</span>` : '')}
   </div>
   <div class="pov-ruler-track">
     <div class="pov-rzsl" style="left:${Math.min(slZL,slZL+slZW).toFixed(1)}%;width:${Math.abs(slZW).toFixed(1)}%"></div>
@@ -1617,7 +1642,7 @@ function _ovScanRowsHtml(snaps) {
 
 function _ovHistHtml(hist) {
   if (!hist || !hist.length) return `<div style="color:#222;font-family:'JetBrains Mono',monospace;font-size:9px">no history yet</div>`;
-  const rc = (r) => r === 'TP2' ? '#00e676' : r === 'TP1' ? '#66aaff' : r === 'SL' ? '#ff3d57' : '#444';
+  const rc = (r) => r === 'TP2' || r === 'TRAILBLAZER' ? '#00e676' : r === 'TP1' ? '#66aaff' : r === 'SL' ? '#ff3d57' : '#444';
   return hist.map(h => {
     const pnl   = h.pnl_usd || 0;
     const pc    = pnl >= 0 ? '#00e676' : '#ff3d57';

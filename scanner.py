@@ -205,7 +205,7 @@ def _leverage_tier(adx: float) -> tuple[str, int]:
 def score_bounce_short(j15m, j1h, stoch_k, stoch_d, stoch_k_prev, stoch_d_prev, ask_pct, adx,
                        j5m: float = 50.0, trend: str = "Neutral") -> tuple[int, str, int]:
     tier, lev = _leverage_tier(adx)
-    stoch_gate = stoch_k > 75 and stoch_k_prev >= stoch_d_prev and stoch_k < stoch_d
+    stoch_gate = stoch_k > 75 and stoch_k < stoch_d
     if not (j15m > J15M_SHORT_GATE and j1h > J1H_SHORT_MIN
             and stoch_gate and ask_pct >= DEPTH_GATE_PCT):
         return 0, tier, lev
@@ -220,7 +220,7 @@ def score_bounce_short(j15m, j1h, stoch_k, stoch_d, stoch_k_prev, stoch_d_prev, 
 def score_bounce_long(j15m, j1h, stoch_k, stoch_d, stoch_k_prev, stoch_d_prev, bid_pct, adx,
                       j5m: float = 50.0, trend: str = "Neutral") -> tuple[int, str, int]:
     tier, lev = _leverage_tier(adx)
-    stoch_gate = stoch_k < 25 and stoch_k_prev <= stoch_d_prev and stoch_k > stoch_d
+    stoch_gate = stoch_k < 25 and stoch_k > stoch_d
     if not (j15m < J15M_LONG_GATE and j1h < J1H_LONG_MAX
             and stoch_gate and bid_pct >= DEPTH_GATE_PCT):
         return 0, tier, lev
@@ -405,10 +405,10 @@ async def run_full_scan(client, market_health: Optional[dict] = None) -> list[di
                 if direction == "SHORT":
                     score, tier, lev = score_bounce_short(j15m, j1h, stoch_k, stoch_d, stoch_k_prev, stoch_d_prev, ask_pct, adx1h, j5m=j5m, trend=trend)
                     gates_arr = [j15m > J15M_SHORT_GATE, j1h > J1H_SHORT_MIN,
-                                 stoch_k > 75 and stoch_k_prev >= stoch_d_prev and stoch_k < stoch_d,
+                                 stoch_k > 75 and stoch_k < stoch_d,
                                  ask_pct >= DEPTH_GATE_PCT]
                     log_gates = (f"j15m={j15m:.1f}(>{J15M_SHORT_GATE}) j1h={j1h:.1f}(>{J1H_SHORT_MIN}) "
-                                 f"stoch_k={stoch_k:.1f}>75 prev_k={stoch_k_prev:.1f}>=prev_d={stoch_d_prev:.1f}->k<d={stoch_d:.1f} "
+                                 f"stoch_k={stoch_k:.1f}>75 k<d={stoch_d:.1f} "
                                  f"ask={ask_pct:.1f}%(>={DEPTH_GATE_PCT}%)")
                     _gc = sum(gates_arr)
                     if _gc == 3:
@@ -417,10 +417,10 @@ async def run_full_scan(client, market_health: Optional[dict] = None) -> list[di
                 else:
                     score, tier, lev = score_bounce_long(j15m, j1h, stoch_k, stoch_d, stoch_k_prev, stoch_d_prev, bid_pct, adx1h, j5m=j5m, trend=trend)
                     gates_arr = [j15m < J15M_LONG_GATE, j1h < J1H_LONG_MAX,
-                                 stoch_k < 25 and stoch_k_prev <= stoch_d_prev and stoch_k > stoch_d,
+                                 stoch_k < 25 and stoch_k > stoch_d,
                                  bid_pct >= DEPTH_GATE_PCT]
                     log_gates = (f"j15m={j15m:.1f}(<{J15M_LONG_GATE}) j1h={j1h:.1f}(<{J1H_LONG_MAX}) "
-                                 f"stoch_k={stoch_k:.1f}<25 prev_k={stoch_k_prev:.1f}<=prev_d={stoch_d_prev:.1f}->k>d={stoch_d:.1f} "
+                                 f"stoch_k={stoch_k:.1f}<25 k>d={stoch_d:.1f} "
                                  f"bid={bid_pct:.1f}%(>={DEPTH_GATE_PCT}%)")
                     _gc = sum(gates_arr)
                     if _gc == 3:

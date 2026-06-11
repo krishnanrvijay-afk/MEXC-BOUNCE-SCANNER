@@ -59,13 +59,35 @@
   .scan-status .ts  { color: #00ff88; }
   .scan-status .cd  { color: #ffaa00; }
 
-  /* Ã¢ÂÂÃ¢ÂÂ J BOUNCE MAP BANNER Ã¢ÂÂÃ¢ÂÂ */
+  /* ── MARKET HEALTH HEADER CHIPS ── */
+    @keyframes mhc-halt-glow    { 0%,100%{box-shadow:0 0 6px 2px rgba(239,68,68,0.6)}  50%{box-shadow:0 0 14px 4px rgba(239,68,68,0.9)} }
+    @keyframes mhc-caution-glow { 0%,100%{box-shadow:0 0 6px 2px rgba(245,158,11,0.5)} 50%{box-shadow:0 0 12px 3px rgba(245,158,11,0.8)} }
+    .mh-chip { display:flex; align-items:center; gap:4px; font-family:'JetBrains Mono',monospace; font-size:9px; font-weight:800; padding:3px 8px; border-radius:4px; cursor:pointer; letter-spacing:0.5px; border:1px solid #2a2a2a; background:#111; color:#aaa; user-select:none; transition:all 0.15s; }
+    .mhc-dot { width:7px; height:7px; border-radius:50%; flex-shrink:0; }
+    .mh-chip-halt    { border-color:rgba(239,68,68,0.6); color:#ef4444; animation:mhc-halt-glow 1.3s ease-in-out infinite; }
+    .mh-chip-caution { border-color:rgba(245,158,11,0.5); color:#f59e0b; animation:mhc-caution-glow 1.8s ease-in-out infinite; }
+    .mh-chip-run     { border-color:rgba(34,197,94,0.35); color:#22c55e; }
+    #mh-ov-bd { position:fixed;inset:0;background:rgba(0,0,0,0.75);backdrop-filter:blur(4px);z-index:1000;display:none;align-items:center;justify-content:center; }
+    #mh-ov-bd.open { display:flex; }
+    #mh-ov-pn { background:#111; border:1px solid #222; border-radius:12px; padding:0; width:320px; max-width:92vw; box-shadow:0 12px 40px rgba(0,0,0,0.8); }
+    .mh-ov-hdr { display:flex; justify-content:space-between; align-items:center; padding:12px 16px 8px; border-bottom:1px solid #1a1a1a; }
+    .mh-ov-title { font-family:'Bebas Neue',sans-serif; font-size:13px; letter-spacing:2px; color:#fff; }
+    .mh-ov-body { padding:14px 16px 18px; display:flex; flex-direction:column; gap:14px; }
+    .mh-ov-sec { display:flex; flex-direction:column; gap:5px; }
+    .mh-ov-shead { display:flex; align-items:center; gap:7px; font-family:'JetBrains Mono',monospace; font-size:10px; font-weight:800; letter-spacing:1px; }
+    .mh-ov-pill { padding:2px 8px; border-radius:4px; font-size:10px; font-weight:800; font-family:'JetBrains Mono',monospace; }
+    .mh-ov-pill-halt    { background:#7f1d1d; color:#ef4444; border:1px solid rgba(239,68,68,0.5); }
+    .mh-ov-pill-caution { background:#78350f; color:#f59e0b; border:1px solid rgba(245,158,11,0.4); }
+    .mh-ov-pill-run     { background:#14532d; color:#22c55e; border:1px solid rgba(34,197,94,0.4); }
+    .mh-ov-line { font-size:11px; font-weight:700; color:#ccc; padding-left:2px; line-height:1.5; }
+
+    /* Ã¢ÂÂÃ¢ÂÂ J BOUNCE MAP BANNER Ã¢ÂÂÃ¢ÂÂ */
   @keyframes jb-conf-pulse   { 0%,100% { text-shadow: 0 0 4px currentColor; } 50% { text-shadow: 0 0 14px currentColor; } }
   @keyframes jb-dot-pulse    { 0%,100% { box-shadow: 0 0 3px rgba(255,170,0,0.5); } 50% { box-shadow: 0 0 7px rgba(255,170,0,0.9); } }
   @keyframes conf-long-glow  { 0%,100% { box-shadow: 0 0 18px rgba(0,230,118,0.15),0 2px 8px rgba(0,0,0,0.6); } 50% { box-shadow: 0 0 32px rgba(0,230,118,0.3),0 2px 8px rgba(0,0,0,0.6); } }
   @keyframes conf-short-glow { 0%,100% { box-shadow: 0 0 18px rgba(255,61,87,0.15),0 2px 8px rgba(0,0,0,0.6); }  50% { box-shadow: 0 0 32px rgba(255,61,87,0.3),0 2px 8px rgba(0,0,0,0.6); } }
   @keyframes conf-sym-pulse  { 0%,100% { text-shadow: 0 0 6px currentColor; } 50% { text-shadow: 0 0 16px currentColor; } }
-  #j15m-banner { background: #0d0d0d; border-bottom: 1px solid #1a1a1a; padding: 5px 16px 4px; }
+  #j15m-banner { background: #0d0d0d; border-bottom: 1px solid #1a1a1a; padding: 8px 12px 14px; }
   .jb-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
   .jb-title { font-size: 8px; font-weight: 800; color: #fff; letter-spacing: 2px; text-transform: uppercase; }
   .jb-header-right { display: flex; align-items: center; gap: 12px; }
@@ -79,18 +101,18 @@
   .jb-tf-active-15M  { background: rgba(0,230,118,0.1);   border-color: rgba(0,230,118,0.4);   color: #00e676; }
   .jb-tf-active-1H   { background: rgba(255,170,0,0.1);   border-color: rgba(255,170,0,0.4);   color: #ffaa00; }
   .jb-tf-active-BOTH { background: rgba(100,160,255,0.1); border-color: rgba(100,160,255,0.4); color: #66aaff; }
-  .jb-ruler-row { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; }
+  .jb-ruler-row { display: flex; align-items: center; gap: 0; margin-bottom: 3px; }
   .jb-rdot { width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; }
   .jb-ruler-content { flex: 1; min-width: 0; }
   .jb-ticks { display: flex; justify-content: space-between; margin-bottom: 1px; }
   .jb-tick { font-family: 'JetBrains Mono', monospace; font-size: 7px; font-weight: 800; }
-  .jb-bar-outer { position: relative; margin-top: 16px; }
+  .jb-bar-outer { position: relative; margin-top: 38px; }
   .jb-chips-layer { position: absolute; left: 0; right: 0; bottom: 5px; height: 0; overflow: visible; z-index: 1; pointer-events: none; }
   .jb-bar { position: relative; height: 5px; background: #141414; border-radius: 3px; }
   .jb-zg { position: absolute; left: 0; height: 100%; background: rgba(0,230,118,0.18); border-radius: 3px 0 0 3px; }
   .jb-zr { position: absolute; height: 100%; background: rgba(255,61,87,0.18); border-radius: 0 3px 3px 0; }
   .jb-mid { position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: rgba(255,255,255,0.05); transform: translateX(-50%); }
-  .cb-chip { position: absolute; bottom: 0; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; font-family: 'JetBrains Mono', monospace; font-size: 8px; font-weight: 800; white-space: nowrap; letter-spacing: 0.3px; }
+  .cb-chip { position: absolute; bottom: 0; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 800; white-space: nowrap; letter-spacing: 0.3px; }
   .cb-tick { width: 1px; height: 4px; background: currentColor; opacity: 0.55; flex-shrink: 0; }
   .cb-conf { animation: jb-conf-pulse 2.2s ease-in-out infinite; }
 
@@ -473,24 +495,6 @@
   .grey  { color: #fff; }
   .white { color: #fff; }
 
-  /* Ã¢ÂÂÃ¢ÂÂ MARKET HEALTH STRIP Ã¢ÂÂÃ¢ÂÂ */
-  #mh-strip { display:flex; align-items:center; gap:12px; padding:0 24px; height:90px; background:#0a0a0a; border-bottom:1px solid #1a1a1a; flex-shrink:0; }
-  .mh-heading { font-family:'Bebas Neue',sans-serif; font-size:11px; letter-spacing:2px; color:#fff; white-space:nowrap; flex-shrink:0; }
-  .mh-cols { display:flex; align-items:stretch; gap:0; flex:1; height:100%; }
-  .mh-section { display:flex; align-items:center; gap:8px; flex:1; padding:8px 12px; }
-  .mh-pill { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; padding:8px 16px; border-radius:8px; min-width:80px; max-height:60px; border:2px solid transparent; flex-shrink:0; }
-  .mh-pill-halt    { background:#7f1d1d; border-color:#ef4444; box-shadow:0 0 16px 4px rgba(239,68,68,0.7); }
-  .mh-pill-caution { background:#78350f; border-color:#f59e0b; box-shadow:0 0 14px 3px rgba(245,158,11,0.6); }
-  .mh-pill-run     { background:#14532d; border-color:#22c55e; box-shadow:0 0 14px 3px rgba(34,197,94,0.6); }
-  .mh-dir   { font-family:'JetBrains Mono',monospace; font-size:13px; font-weight:700; color:#fff; letter-spacing:1px; line-height:1; }
-  .mh-state { font-family:'Bebas Neue',sans-serif; font-size:16px; font-weight:700; color:#fff; letter-spacing:2px; line-height:1; }
-  .mh-companion { flex:1; display:flex; flex-direction:column; justify-content:center; gap:4px; padding:6px 10px; border-radius:6px; background:rgba(0,0,0,0.3); border:1px solid transparent; overflow:hidden; }
-  .mh-comp-halt    { border-color:#ef4444; }
-  .mh-comp-caution { border-color:#f59e0b; }
-  .mh-comp-run     { border-color:#22c55e; }
-  .mh-ctx-line { font-size:11px; font-weight:700; color:#fff; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; line-height:1.4; }
-  .mh-vdivider { width:1px; background:#222; align-self:stretch; margin:12px 0; flex-shrink:0; }
-
   /* Ã¢ÂÂÃ¢ÂÂ TRADE LOG VISUAL ROW Ã¢ÂÂÃ¢ÂÂ */
   .tl-vis { display:flex; align-items:center; gap:10px; padding:3px 4px 5px; }
   .tl-badge { font-family:'JetBrains Mono',monospace; font-size:11px; font-weight:700; padding:2px 8px; border-radius:3px; color:#fff; letter-spacing:0.5px; }
@@ -538,9 +542,12 @@
         <div class="mkt-row"><span class="mkt-label">J15M OVERSOLD</span><div class="mkt-chips" id="mkt-os"></div></div>
       </div>
     </div>
-    <div class="sep"></div>
-    <div class="hstat">
-      <div class="hstat-label">POSITIONS</div>
+      <div class="sep"></div>
+      <div id="mhc-short" class="mh-chip mh-chip-caution" onclick="openMhOverlay()" title="SHORT market health">S<span class="mhc-dot" id="mhc-sdot" style="background:#f59e0b"></span></div>
+      <div id="mhc-long"  class="mh-chip mh-chip-caution" onclick="openMhOverlay()" title="LONG market health">L<span class="mhc-dot" id="mhc-ldot" style="background:#f59e0b"></span></div>
+      <div class="sep"></div>
+      <div class="hstat">
+        <div class="hstat-label">POSITIONS</div>
       <div class="hstat-value blue" id="h-positions">0</div>
     </div>
     <div class="sep"></div>
@@ -567,31 +574,6 @@
   <div class="scan-status" id="scan-status">waiting for scanÃ¢ÂÂ¦</div>
 </div>
 
-<!-- Ã¢ÂÂÃ¢ÂÂ MARKET HEALTH STRIP Ã¢ÂÂÃ¢ÂÂ -->
-<div id="mh-strip">
-  <span class="mh-heading">&#x1F4CA; MARKET HEALTH</span>
-  <div class="mh-cols">
-    <div class="mh-section">
-      <div class="mh-pill mh-pill-caution" id="mh-short">
-        <span class="mh-dir">SHORT</span>
-        <span class="mh-state">CAUTION</span>
-      </div>
-      <div class="mh-companion mh-comp-caution" id="mh-short-ctx">
-        <div class="mh-ctx-line">Initialising&hellip;</div>
-      </div>
-    </div>
-    <div class="mh-vdivider"></div>
-    <div class="mh-section">
-      <div class="mh-pill mh-pill-caution" id="mh-long">
-        <span class="mh-dir">LONG</span>
-        <span class="mh-state">CAUTION</span>
-      </div>
-      <div class="mh-companion mh-comp-caution" id="mh-long-ctx">
-        <div class="mh-ctx-line">Initialising&hellip;</div>
-      </div>
-    </div>
-  </div>
-</div>
 
 <!-- Ã¢ÂÂÃ¢ÂÂ J15M OPPORTUNITY BANNER Ã¢ÂÂÃ¢ÂÂ -->
 <div id="j15m-banner">
@@ -611,7 +593,6 @@
     </div>
   </div>
   <div class="jb-ruler-row" id="jb-ruler-15m">
-    <span class="jb-rdot" style="background:#00e676"></span>
     <div class="jb-ruler-content">
       <div class="jb-ticks">
         <span class="jb-tick" style="color:#00e676">0</span><span class="jb-tick" style="color:#00e676">20</span><span class="jb-tick" style="color:#555">40</span><span class="jb-tick" style="color:#555">60</span><span class="jb-tick" style="color:#ff3d57">80</span><span class="jb-tick" style="color:#ff3d57">100</span>
@@ -627,7 +608,132 @@
     </div>
   </div>
   <div class="jb-ruler-row" id="jb-ruler-1h">
-    <span class="jb-rdot" style="background:#ffaa00"></span>
+    <div class="jb-ruler-content">
+      <div class="jb-ticks">
+        <span class="jb-tick" style="color:#00e676">0</span><span class="jb-tick" style="color:#00e676">20</span><span class="jb-tick" style="color:#00e676">40</span><span class="jb-tick" style="color:#ff3d57">60</span><span class="jb-tick" style="color:#ff3d57">80</span><span class="jb-tick" style="color:#ff3d57">100</span>
+      </div>
+      <div class="jb-bar-outer">
+        <div class="jb-chips-layer" id="jb-chips-1h"></div>
+        <div class="jb-bar">
+          <div class="jb-zg" style="width:40%"></div>
+          <div class="jb-zr" style="left:60%;width:40%"></div>
+          <div class="jb-mid"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Ã¢ÂÂÃ¢ÂÂ SCANNER GRID VIEW Ã¢ÂÂÃ¢ÂÂ -->
+<div id="view-grid">
+  <div class="card-grid" id="card-grid"></div>
+</div>
+
+<!-- Ã¢ÂÂÃ¢ÂÂ ALERTS TAB Ã¢ÂÂÃ¢ÂÂ -->
+<div id="tab-alerts">
+  <div class="alerts-toolbar">
+    <span class="alerts-title">ALERTS</span>
+    <span class="alerts-count" id="alert-count">0</span>
+    <button class="panel-btn" onclick="clearAlerts()">CLEAR ALL</button>
+  </div>
+  <div class="alert-grid" id="alert-grid">
+    <div class="no-content">No alerts yet</div>
+  </div>
+</div>
+
+<!-- Ã¢ÂÂÃ¢ÂÂ POSITIONS TAB Ã¢ÂÂÃ¢ÂÂ -->
+<div id="tab-positions">
+  <div class="pos-grid" id="pos-grid">
+    <div class="no-content">No open positions</div>
+  </div>
+</div>
+
+<!-- Ã¢ÂÂÃ¢ÂÂ LOG TAB Ã¢ÂÂÃ¢ÂÂ -->
+<div id="tab-log">
+  <div class="log-toolbar">
+    <button class="log-btn lb-csv"   onclick="exportCsv()">EXPORT CSV</button>
+    <button class="log-btn lb-clear" onclick="clearLog()">CLEAR LOG</button>
+    <span class="log-count" id="log-count">0 trades</span>
+  </div>
+  <div class="log-date-filter">
+    <label class="log-date-label">FROM</label>
+    <input type="date" id="log-date-from" class="log-date-input" oninput="renderLogTab()">
+    <label class="log-date-label">TO</label>
+    <input type="date" id="log-date-to" class="log-date-input" oninput="renderLogTab()">
+    <button class="log-btn lb-date-clear" onclick="clearDateFilter()">CLEAR</button>
+  </div>
+  <div id="stats-panel"></div>
+  <div class="log-table-wrap">
+    <div id="log-body" class="log-empty">No closed trades yet</div>
+  </div>
+  <div id="perf-panel"></div>
+</div>
+
+
+<script>
+  const SCAN_INTERVAL  = {{ scan_interval }};
+  const PRICE_INTERVAL = 8;
+</script>
+<script src="/static/dashboard.js"></script>
+
+  <!-- ── MARKET HEALTH OVERLAY ── -->
+  <div id="mh-ov-bd" onclick="if(event.target===this)closeMhOverlay()">
+    <div id="mh-ov-pn">
+      <div class="mh-ov-hdr">
+        <span class="mh-ov-title">MARKET HEALTH</span>
+        <button class="pov-x" onclick="closeMhOverlay()">&#x2715;</button>
+      </div>
+      <div id="mh-ov-body" class="mh-ov-body"></div>
+    </div>
+  </div>
+  </body>
+</html><div class="nav-row">
+  <div class="nav-pills">
+    <div class="fp active"         data-tab="grid"    data-filter="ALL"          onclick="setNav(this)">ALL</div>
+    <div class="fp fp-short"        data-tab="grid"    data-filter="BOUNCE_SHORT" onclick="setNav(this)">BOUNCE SHORT</div>
+    <div class="fp fp-long"         data-tab="grid"    data-filter="BOUNCE_LONG"  onclick="setNav(this)">BOUNCE LONG</div>
+    <div class="fp tab-alerts"     data-tab="alerts"  data-filter=""             onclick="setNav(this)">ALERTS <span class="fp-count" id="nav-alert-count">0</span></div>
+    <div class="fp tab-pos"        data-tab="pos"     data-filter=""             onclick="setNav(this)">POSITIONS <span class="fp-count" id="nav-pos-count">0</span></div>
+    <div class="fp"                data-tab="grid"    data-filter="COOLDOWN"     onclick="setNav(this)">COOLDOWN</div>
+    <div class="fp tab-log"        data-tab="log"     data-filter=""             onclick="setNav(this)">LOG <span class="fp-count" id="nav-log-count">0</span></div>
+  </div>
+  <div class="scan-status" id="scan-status">waiting for scanÃ¢ÂÂ¦</div>
+</div>
+
+
+<!-- Ã¢ÂÂÃ¢ÂÂ J15M OPPORTUNITY BANNER Ã¢ÂÂÃ¢ÂÂ -->
+<div id="j15m-banner">
+  <div class="jb-header">
+    <span class="jb-title">J Ã¢ÂÂ BOUNCE MAP</span>
+    <div class="jb-header-right">
+      <div class="jb-legend">
+        <span class="jb-leg jb-leg-green"><span class="jb-ldot" style="background:#00e676"></span>OS</span>
+        <span class="jb-leg jb-leg-red"><span class="jb-ldot" style="background:#ff3d57"></span>OB</span>
+        <span class="jb-leg jb-leg-amber"><span class="jb-ldot jb-ldot-pulse" style="background:#ffaa00"></span>Ã¢ÂÂ¦ CONF</span>
+      </div>
+      <div class="jb-tf-pills">
+        <button class="jb-tf-pill" id="jb-tf-15M" onclick="setBannerTF('15M')">15M</button>
+        <button class="jb-tf-pill" id="jb-tf-1H"  onclick="setBannerTF('1H')">1H</button>
+        <button class="jb-tf-pill jb-tf-active-BOTH" id="jb-tf-BOTH" onclick="setBannerTF('BOTH')">BOTH</button>
+      </div>
+    </div>
+  </div>
+  <div class="jb-ruler-row" id="jb-ruler-15m">
+    <div class="jb-ruler-content">
+      <div class="jb-ticks">
+        <span class="jb-tick" style="color:#00e676">0</span><span class="jb-tick" style="color:#00e676">20</span><span class="jb-tick" style="color:#555">40</span><span class="jb-tick" style="color:#555">60</span><span class="jb-tick" style="color:#ff3d57">80</span><span class="jb-tick" style="color:#ff3d57">100</span>
+      </div>
+      <div class="jb-bar-outer">
+        <div class="jb-chips-layer" id="jb-chips-15m"></div>
+        <div class="jb-bar">
+          <div class="jb-zg" style="width:20%"></div>
+          <div class="jb-zr" style="left:80%;width:20%"></div>
+          <div class="jb-mid"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="jb-ruler-row" id="jb-ruler-1h">
     <div class="jb-ruler-content">
       <div class="jb-ticks">
         <span class="jb-tick" style="color:#00e676">0</span><span class="jb-tick" style="color:#00e676">20</span><span class="jb-tick" style="color:#00e676">40</span><span class="jb-tick" style="color:#ff3d57">60</span><span class="jb-tick" style="color:#ff3d57">80</span><span class="jb-tick" style="color:#ff3d57">100</span>

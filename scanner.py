@@ -2,6 +2,7 @@ import asyncio
 import time
 import logging
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from typing import Optional
 
 from config import (
@@ -267,10 +268,12 @@ def clear_all_scanner_state():
 
 
 def get_session_name() -> str:
-    """Return current trading session name based on UTC hour."""
-    h = datetime.now(timezone.utc).hour
-    if h >= 17 or h < 8:  return "ASIA"
-    if 8  <= h < 12:       return "EU"
+    """Return current trading session name based on US Eastern time (DST-aware).
+    Boundaries (ET): ASIA 5pm-3am | EU 3am-12pm (incl EU/US overlap) | US 12pm-5pm
+    """
+    h = datetime.now(ZoneInfo("America/New_York")).hour
+    if h >= 17 or h < 3:  return "ASIA"
+    if 3  <= h < 12:       return "EU"
     if 12 <= h < 17:       return "US"
     return "OFF"
 

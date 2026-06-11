@@ -96,12 +96,35 @@ function updateScanStatus() {
 
 // ── Market Health strip ───────────────────────────────────────────────────────
 function renderMarketHealth() {
-  const mh = STATE?.market_health;
-  const pillCls = st => 'mh-pill mh-pill-' + (st || 'caution').toLowerCase();
-  const compCls = st => 'mh-companion mh-comp-' + (st || 'caution').toLowerCase();
+    const mh = STATE?.market_health;
+    if (!mh) return;
+    const stateOf = (st) => (st || 'CAUTION').toUpperCase();
+    const chipCls = st => {
+      const s = stateOf(st);
+      return s === 'HALT' ? 'mh-chip mh-chip-halt' : s === 'RUN' ? 'mh-chip mh-chip-run' : 'mh-chip mh-chip-caution';
+    };
+    const dotCol = st => {
+      const s = stateOf(st);
+      return s === 'HALT' ? '#ef4444' : s === 'RUN' ? '#22c55e' : '#f59e0b';
+    };
+    const ss = mh.short_status || 'CAUTION';
+    const ls = mh.long_status  || 'CAUTION';
+    const sc = document.getElementById('mhc-short');
+    const lc = document.getElementById('mhc-long');
+    const sd = document.getElementById('mhc-sdot');
+    const ld = document.getElementById('mhc-ldot');
+    if (sc) sc.className = chipCls(ss);
+    if (lc) lc.className = chipCls(ls);
+    if (sd) sd.style.background = dotCol(ss);
+    if (ld) ld.style.background = dotCol(ls);
+    window._mhStatusShort = ss;
+    window._mhStatusLong  = ls;
+    window._mhCtxShort    = _mhNarrative('SHORT', ss, mh);
+    window._mhCtxLong     = _mhNarrative('LONG',  ls, mh);
+  }
 
-  const context = (status, side, mh) => {
-    if (!mh) return '<div class="mh-ctx-line">Initialising…</div>';
+  function _mhNarrative(side, status, mh) {
+    if (!mh) return [];
     const isBear = side === 'SHORT';
     const ratio  = isBear ? (mh.bear_ratio ?? 0) : (mh.bull_ratio ?? 0);
     const total  = mh.total || 10;
@@ -110,50 +133,52 @@ function renderMarketHealth() {
     const adx    = mh.avg_adx || 0;
     const j5     = mh.avg_j5  || 50;
     const slN    = Math.round((mh.sl_rate || 0) * 6);
-    if (status === 'RUN') {
-      return '<div class="mh-ctx-line">All conditions met</div>' +
-             '<div class="mh-ctx-line">Signals clear — ready to fire</div>';
-    }
+    if (status === 'RUN')  return ['All conditions met', 'Signals clear — ready to fire'];
     if (status === 'HALT') {
       const lines = [];
-      if (ratio < 0.3)
-        lines.push(`${lbl} pairs ${pCount} of ${total} — need ${Math.ceil(total * 0.3)}+`);
-      if ((mh.sl_rate || 0) >= 0.6)
-        lines.push(`SL rate ${slN}/6 — too high`);
-      if (isBear  && j5 >= 85 && ratio < 0.5)
-        lines.push(`Avg J5 ${j5.toFixed(1)} overbought + bears below 50%`);
-      if (!isBear && j5 <= 15 && ratio < 0.5)
-        lines.push(`Avg J5 ${j5.toFixed(1)} oversold + bulls below 50%`);
-      if (!lines.length) lines.push('Market conditions unsafe');
-      return lines.slice(0, 2).map(l => `<div class="mh-ctx-line">${l}</div>`).join('');
+      if (ratio < 0.3)                          lines.push(lbl + ' pairs ' + pCount + ' of ' + total + ' — need ' + Math.ceil(total*0.3) + '+');
+      if ((mh.sl_rate||0) >= 0.6)               lines.push('SL rate ' + slN + '/6 — too high');
+      if (isBear  && j5 >= 85 && ratio < 0.5)  lines.push('Avg J5 ' + j5.toFixed(1) + ' overbought + bears below 50%');
+      if (!isBear && j5 <= 15 && ratio < 0.5)  lines.push('Avg J5 ' + j5.toFixed(1) + ' oversold + bulls below 50%');
+      if (!lines.length)                         lines.push('Market conditions unsafe');
+      return lines.slice(0, 3);
     }
     const lines = [];
-    if (ratio < 0.6)
-      lines.push(`Need ${lbl} ratio 0.6 — currently ${ratio.toFixed(2)}`);
-    if (adx < 35)
-      lines.push(`Need avg ADX 35 — currently ${adx.toFixed(1)}`);
-    if (isBear && j5 > 70)
-      lines.push(`Need avg J5 ≤70 — currently ${j5.toFixed(1)}`);
-    if (!isBear && j5 < 30)
-      lines.push(`Need avg J5 ≥30 — currently ${j5.toFixed(1)}`);
-    if ((mh.sl_rate || 0) >= 0.4)
-      lines.push(`SL rate ${slN}/6 — need below 3`);
-    if (!lines.length) lines.push('Near RUN threshold');
-    return lines.slice(0, 2).map(l => `<div class="mh-ctx-line">${l}</div>`).join('');
-  };
+    if (ratio < 0.6)           lines.push('Need ' + lbl + ' ratio 0.6 — currently ' + ratio.toFixed(2));
+    if (adx < 35)              lines.push('Need avg ADX 35 — currently ' + adx.toFixed(1));
+    if (isBear && j5 > 70)    lines.push('Need avg J5 ≤70 — currently ' + j5.toFixed(1));
+    if (!isBear && j5 < 30)   lines.push('Need avg J5 ≥30 — currently ' + j5.toFixed(1));
+    if ((mh.sl_rate||0) >= 0.4) lines.push('SL rate ' + slN + '/6 — need below 3');
+    if (!lines.length)          lines.push('Near RUN threshold');
+    return lines.slice(0, 3);
+  }
 
-  const renderSide = (pillId, ctxId, status, side) => {
-    const pill = document.getElementById(pillId);
-    const ctx  = document.getElementById(ctxId);
-    if (!pill || !ctx) return;
-    pill.className = pillCls(status);
-    pill.innerHTML = `<span class="mh-dir">${side}</span><span class="mh-state">${status || 'CAUTION'}</span>`;
-    ctx.className  = compCls(status);
-    ctx.innerHTML  = context(status, side, mh);
-  };
-  renderSide('mh-short', 'mh-short-ctx', mh?.short_status || 'CAUTION', 'SHORT');
-  renderSide('mh-long',  'mh-long-ctx',  mh?.long_status  || 'CAUTION', 'LONG');
-}
+  function openMhOverlay() {
+    const bd   = document.getElementById('mh-ov-bd');
+    const body = document.getElementById('mh-ov-body');
+    if (!bd || !body) return;
+    const makeSec = (label, status, lines) => {
+      const st  = (status || 'CAUTION').toUpperCase();
+      const cls = st === 'HALT' ? 'mh-ov-pill-halt' : st === 'RUN' ? 'mh-ov-pill-run' : 'mh-ov-pill-caution';
+      const col = st === 'HALT' ? '#ef4444' : st === 'RUN' ? '#22c55e' : '#f59e0b';
+      const lh  = (lines||[]).map(l => '<div class="mh-ov-line">' + l + '</div>').join('');
+      return '<div class="mh-ov-sec"><div class="mh-ov-shead" style="color:' + col + '">'
+        + label + '<span class="mh-ov-pill ' + cls + '">' + st + '</span></div>' + lh + '</div>';
+    };
+    body.innerHTML =
+      makeSec('SHORT SIDE', window._mhStatusShort, window._mhCtxShort) +
+      '<div style="height:1px;background:#1a1a1a;margin:2px 0"></div>' +
+      makeSec('LONG SIDE',  window._mhStatusLong,  window._mhCtxLong);
+    bd.classList.add('open');
+  }
+
+  function closeMhOverlay() {
+    const bd = document.getElementById('mh-ov-bd');
+    if (bd) bd.classList.remove('open');
+  }
+
+  
+
 function render() {
   renderHeader();
   updateNavCounts();
@@ -464,7 +489,552 @@ function dirRow(direction, stochK, stochD, rsi15m, depthPct) {
     <div class="dir-vals">
       <div class="dv-item">
         <span class="dv-label">STOCH</span>
-        <span class="dv-val ${stochColor}">${stochK !== null && stochD !== null ? stochK.toFixed(0) + '/' + stochD.toFixed(0) : '—'}</span><span style="font-size:9px;color:#555;margin-left:3px">RSI${rsi15m.toFixed(0)}</span>
+        <span class="dv-val ${stochColor}">${stochK !== null && stochD !== null ? stochK.toFixed(1) + '/' + stochD.toFixed(1) : '—'}</span><span style="font-size:9px;color:#555;margin-left:3px">RSI${rsi15m.toFixed(0)}</span>
+      </div>
+      <div class="dv-item">
+        <span class="dv-label">${depthLabel}</span>
+        <span class="dv-val ${depthColor}">${depthPct.toFixed(0)}%</span>
+      </div>
+    </div>
+  </div>`;
+}
+
+// ── Banner TF switcher ────────────────────────────────────────────────────────
+function setBannerTF(tf) {
+  bannerTF = tf;
+  ['15M', '1H', 'BOTH'].forEach(t => {
+    const el = document.getElementById(`jb-tf-${t}`);
+    if (!el) return;
+    el.className = 'jb-tf-pill' + (bannerTF === t ? ` jb-tf-active-${t}` : '');
+  });
+  const r15m = document.getElementById('jb-ruler-15m');
+  const r1h  = document.getElementById('jb-ruler-1h');
+  if (r15m) r15m.style.display = (bannerTF === '1H')  ? 'none' : '';
+  if (r1h)  r1h.style.display  = (bannerTF === '15M') ? 'none' : '';
+  renderBanner();
+}
+
+// ── Compact J Opportunity Banner — chips on bar ───────────────────────────────
+function renderBanner() {
+  const pairs = STATE?.pair_states || [];
+  if (!pairs.length) return;
+
+  function fillRuler(containerId, tfKey) {
+    const container = document.getElementById(containerId);
+    if (!container || container.style.display === 'none') return;
+
+    const items = [...pairs].map(p => {
+      const raw = tfKey === '15m' ? (p.j15m || 50) : (p.j1h || 50);
+      const j   = Math.min(97, Math.max(3, +raw));
+      const longConf  = (p.j15m || 0) < 20 && (p.j1h || 0) < 40;
+      const shortConf = (p.j15m || 0) > 80 && (p.j1h || 0) > 60;
+      return { sym: p.symbol, j, longConf, shortConf };
+    }).sort((a, b) => a.j - b.j);
+
+    // Anti-overlap: up to 3 stagger rows — pairs within 5 pts try next row
+      const NUM_ROWS = 3;
+      const rowEdge = new Array(NUM_ROWS).fill(undefined);
+      const placed = items.map(item => {
+        let row = 0;
+        for (let r = 0; r < NUM_ROWS; r++) {
+          if (rowEdge[r] === undefined || rowEdge[r] <= item.j - 5) { row = r; break; }
+          row = Math.min(r + 1, NUM_ROWS - 1);
+        }
+        rowEdge[row] = item.j + 5;
+        return { ...item, row };
+      });
+  ard.js ────────────────────────────────────── */
+let STATE        = null;
+let activeFilter = 'ALL';
+let activeTab    = 'grid';
+let lastScanAt   = null;
+let marketOpen   = false;
+let posTimers    = {};
+let bannerTF     = 'BOTH';
+
+const ADX_FADE_MAX = 60;
+
+// ── Fetch + countdown state ───────────────────────────────────────────────────
+let _scanCdSec   = 0;   // counts down to next scan
+let _priceCdSec  = 0;   // counts down to next price update
+
+// Tick every second — scan countdown, per-card price countdown
+setInterval(() => {
+  _scanCdSec  = Math.max(0, _scanCdSec  - 1);
+  _priceCdSec = Math.max(0, _priceCdSec - 1);
+  updateScanStatus();
+  // Update all per-card price countdown spans in-place (no re-render)
+  document.querySelectorAll('.price-cd-val').forEach(el => {
+    el.textContent = `${_priceCdSec}s`;
+  });
+}, 1000);
+
+// Fetch state every 2s
+async function fetchState() {
+  try {
+    const r = await fetch('/api/state');
+    if (!r.ok) return;
+    STATE = await r.json();
+
+    // Reset price countdown whenever we get fresh prices
+    _priceCdSec = PRICE_INTERVAL;
+
+    // Reset scan countdown when scan_at changes
+    if (STATE.last_scan_at && STATE.last_scan_at !== lastScanAt) {
+      lastScanAt  = STATE.last_scan_at;
+      _scanCdSec  = SCAN_INTERVAL;
+    }
+
+    render();
+  } catch (e) { /* network blip */ }
+}
+setInterval(fetchState, 2000);
+fetchState();
+
+// Dismiss market popover on outside click
+document.addEventListener('click', e => {
+  if (marketOpen && !e.target.closest('.mkt-btn-wrap')) closeMarket();
+});
+
+// ── Navigation ────────────────────────────────────────────────────────────────
+function setNav(el) {
+  document.querySelectorAll('.fp').forEach(f => f.classList.remove('active'));
+  el.classList.add('active');
+  activeTab = el.dataset.tab;
+  if (activeTab === 'grid' && el.dataset.filter) activeFilter = el.dataset.filter;
+
+  document.getElementById('view-grid').style.display     = activeTab === 'grid'   ? '' : 'none';
+  document.getElementById('tab-alerts').style.display    = activeTab === 'alerts' ? 'block' : 'none';
+  document.getElementById('tab-positions').style.display = activeTab === 'pos'    ? 'block' : 'none';
+  document.getElementById('tab-log').style.display       = activeTab === 'log'    ? 'block' : 'none';
+
+  if (STATE) render();
+}
+
+// ── Market popover ────────────────────────────────────────────────────────────
+function toggleMarket(e) {
+  e.stopPropagation();
+  marketOpen ? closeMarket() : openMarket();
+}
+function openMarket() {
+  marketOpen = true;
+  document.getElementById('mkt-btn').classList.add('open');
+  document.getElementById('mkt-popover').classList.add('open');
+}
+function closeMarket() {
+  marketOpen = false;
+  document.getElementById('mkt-btn').classList.remove('open');
+  document.getElementById('mkt-popover').classList.remove('open');
+}
+
+// ── Scan status text (updated by ticker and by render) ────────────────────────
+function updateScanStatus() {
+  const el = document.getElementById('scan-status');
+  if (!el) return;
+  if (!lastScanAt) { el.innerHTML = 'waiting for scan…'; return; }
+  const d = new Date(lastScanAt * 1000);
+  const ts = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  el.innerHTML = `last scan <span class="ts">${ts}</span> · #${STATE?.scan_count||0} · <span class="cd">next in ${_scanCdSec}s</span>`;
+}
+
+// ── Master render ─────────────────────────────────────────────────────────────
+
+// ── Market Health strip ───────────────────────────────────────────────────────
+function renderMarketHealth() {
+    const mh = STATE?.market_health;
+    if (!mh) return;
+    const stateOf = (st) => (st || 'CAUTION').toUpperCase();
+    const chipCls = st => {
+      const s = stateOf(st);
+      return s === 'HALT' ? 'mh-chip mh-chip-halt' : s === 'RUN' ? 'mh-chip mh-chip-run' : 'mh-chip mh-chip-caution';
+    };
+    const dotCol = st => {
+      const s = stateOf(st);
+      return s === 'HALT' ? '#ef4444' : s === 'RUN' ? '#22c55e' : '#f59e0b';
+    };
+    const ss = mh.short_status || 'CAUTION';
+    const ls = mh.long_status  || 'CAUTION';
+    const sc = document.getElementById('mhc-short');
+    const lc = document.getElementById('mhc-long');
+    const sd = document.getElementById('mhc-sdot');
+    const ld = document.getElementById('mhc-ldot');
+    if (sc) sc.className = chipCls(ss);
+    if (lc) lc.className = chipCls(ls);
+    if (sd) sd.style.background = dotCol(ss);
+    if (ld) ld.style.background = dotCol(ls);
+    window._mhStatusShort = ss;
+    window._mhStatusLong  = ls;
+    window._mhCtxShort    = _mhNarrative('SHORT', ss, mh);
+    window._mhCtxLong     = _mhNarrative('LONG',  ls, mh);
+  }
+
+  function _mhNarrative(side, status, mh) {
+    if (!mh) return [];
+    const isBear = side === 'SHORT';
+    const ratio  = isBear ? (mh.bear_ratio ?? 0) : (mh.bull_ratio ?? 0);
+    const total  = mh.total || 10;
+    const pCount = Math.round(ratio * total);
+    const lbl    = isBear ? 'bear' : 'bull';
+    const adx    = mh.avg_adx || 0;
+    const j5     = mh.avg_j5  || 50;
+    const slN    = Math.round((mh.sl_rate || 0) * 6);
+    if (status === 'RUN')  return ['All conditions met', 'Signals clear — ready to fire'];
+    if (status === 'HALT') {
+      const lines = [];
+      if (ratio < 0.3)                          lines.push(lbl + ' pairs ' + pCount + ' of ' + total + ' — need ' + Math.ceil(total*0.3) + '+');
+      if ((mh.sl_rate||0) >= 0.6)               lines.push('SL rate ' + slN + '/6 — too high');
+      if (isBear  && j5 >= 85 && ratio < 0.5)  lines.push('Avg J5 ' + j5.toFixed(1) + ' overbought + bears below 50%');
+      if (!isBear && j5 <= 15 && ratio < 0.5)  lines.push('Avg J5 ' + j5.toFixed(1) + ' oversold + bulls below 50%');
+      if (!lines.length)                         lines.push('Market conditions unsafe');
+      return lines.slice(0, 3);
+    }
+    const lines = [];
+    if (ratio < 0.6)           lines.push('Need ' + lbl + ' ratio 0.6 — currently ' + ratio.toFixed(2));
+    if (adx < 35)              lines.push('Need avg ADX 35 — currently ' + adx.toFixed(1));
+    if (isBear && j5 > 70)    lines.push('Need avg J5 ≤70 — currently ' + j5.toFixed(1));
+    if (!isBear && j5 < 30)   lines.push('Need avg J5 ≥30 — currently ' + j5.toFixed(1));
+    if ((mh.sl_rate||0) >= 0.4) lines.push('SL rate ' + slN + '/6 — need below 3');
+    if (!lines.length)          lines.push('Near RUN threshold');
+    return lines.slice(0, 3);
+  }
+
+  function openMhOverlay() {
+    const bd   = document.getElementById('mh-ov-bd');
+    const body = document.getElementById('mh-ov-body');
+    if (!bd || !body) return;
+    const makeSec = (label, status, lines) => {
+      const st  = (status || 'CAUTION').toUpperCase();
+      const cls = st === 'HALT' ? 'mh-ov-pill-halt' : st === 'RUN' ? 'mh-ov-pill-run' : 'mh-ov-pill-caution';
+      const col = st === 'HALT' ? '#ef4444' : st === 'RUN' ? '#22c55e' : '#f59e0b';
+      const lh  = (lines||[]).map(l => '<div class="mh-ov-line">' + l + '</div>').join('');
+      return '<div class="mh-ov-sec"><div class="mh-ov-shead" style="color:' + col + '">'
+        + label + '<span class="mh-ov-pill ' + cls + '">' + st + '</span></div>' + lh + '</div>';
+    };
+    body.innerHTML =
+      makeSec('SHORT SIDE', window._mhStatusShort, window._mhCtxShort) +
+      '<div style="height:1px;background:#1a1a1a;margin:2px 0"></div>' +
+      makeSec('LONG SIDE',  window._mhStatusLong,  window._mhCtxLong);
+    bd.classList.add('open');
+  }
+
+  function closeMhOverlay() {
+    const bd = document.getElementById('mh-ov-bd');
+    if (bd) bd.classList.remove('open');
+  }
+
+  
+
+function render() {
+  renderHeader();
+  updateNavCounts();
+  updateScanStatus();
+  renderBanner();
+  renderMarketHealth();
+  if (activeTab === 'grid')   renderCards();
+  if (activeTab === 'alerts') renderAlertsTab();
+  if (activeTab === 'pos')    renderPositionsTab();
+  if (activeTab === 'log')    renderLogTab();
+  if (marketOpen)             updateMarketPopover();
+}
+
+// ── Nav counts ────────────────────────────────────────────────────────────────
+function updateNavCounts() {
+  const alerts = STATE?.alerts      || [];
+  const trades = STATE?.open_trades || {};
+  const log    = STATE?.trade_log   || [];
+  document.getElementById('nav-alert-count').textContent = alerts.length;
+  document.getElementById('nav-pos-count').textContent   = Object.keys(trades).length;
+  document.getElementById('nav-log-count').textContent   = log.length;
+}
+
+// ── Header ────────────────────────────────────────────────────────────────────
+function renderHeader() {
+  const { daily, account, circuit_breaker, scan_count } = STATE;
+
+  const pnlEl = document.getElementById('h-pnl');
+  pnlEl.textContent = `$${(daily?.pnl || 0).toFixed(2)}`;
+  pnlEl.className   = 'hstat-value ' + ((daily?.pnl || 0) >= 0 ? 'green' : 'red');
+
+  const unrealPnl = account?.unrealized_pnl || 0;
+    const unrealEl  = document.getElementById('h-margin');
+    unrealEl.textContent = (unrealPnl >= 0 ? '+' : '') + '$' + Math.abs(unrealPnl).toFixed(2);
+    unrealEl.className   = 'hstat-value ' + (unrealPnl > 0 ? 'green' : unrealPnl < 0 ? 'red' : '');
+  document.getElementById('h-positions').textContent = account?.slots_used || 0;
+  document.getElementById('h-scans').textContent     = scan_count || 0;
+
+  const modeBadge = document.getElementById('mode-badge');
+  if (modeBadge) {
+    if (account?.paper_mode) {
+      modeBadge.style.display    = 'block';
+      modeBadge.className        = 'mode-badge mode-badge-paper';
+      modeBadge.textContent      = 'PAPER';
+    } else if (account?.live_manual_entry_only) {
+      modeBadge.style.display    = 'block';
+      modeBadge.className        = 'mode-badge mode-badge-live-safe';
+      modeBadge.textContent      = 'LIVE 🔒';
+    } else {
+      modeBadge.style.display    = 'block';
+      modeBadge.className        = 'mode-badge mode-badge-live-danger';
+      modeBadge.textContent      = 'LIVE ⚠';
+    }
+  }
+  document.getElementById('cb-badge').style.display    = circuit_breaker?.active ? 'block' : 'none';
+  renderResetSessionBtn();
+}
+
+// ── Market popover ────────────────────────────────────────────────────────────
+function updateMarketPopover() {
+  const pairs = STATE?.pair_states || [];
+  const bulls = pairs.filter(p => p.trend === 'Strong Bull').map(p => p.symbol);
+  const bears = pairs.filter(p => p.trend === 'Strong Bear').map(p => p.symbol);
+  const ob    = pairs.filter(p => p.j15m >= 80).map(p => p.symbol);
+  const os    = pairs.filter(p => p.j15m <= 20).map(p => p.symbol);
+
+  const chips = (arr, color) => arr.length
+    ? arr.map(s => `<span class="mkt-chip" style="color:${color}">${s}</span>`).join('')
+    : `<span style="color:#333;font-size:9px;">none</span>`;
+
+  document.getElementById('mkt-bull').innerHTML = chips(bulls, '#00ff88');
+  document.getElementById('mkt-bear').innerHTML = chips(bears, '#ff4444');
+  document.getElementById('mkt-ob').innerHTML   = chips(ob,    '#ff4444');
+  document.getElementById('mkt-os').innerHTML   = chips(os,    '#00ff88');
+}
+
+// ── Pair cards ────────────────────────────────────────────────────────────────
+function renderCards() {
+  const grid    = document.getElementById('card-grid');
+  const pairs   = STATE.pair_states || [];
+  const alerts  = STATE.alerts || [];
+  const trades  = STATE.open_trades || {};
+  const changes = STATE.price_changes || {};
+
+  const filtered = pairs.filter(p => {
+    if (activeFilter === 'ALL')          return true;
+    if (activeFilter === 'ALERTS')       return alerts.some(a => a.symbol === p.symbol);
+    if (activeFilter === 'BOUNCE_SHORT') return p.short_score === 4;
+    if (activeFilter === 'BOUNCE_LONG')  return p.long_score  === 4;
+    if (activeFilter === 'COOLDOWN')     return p.cooldown_short > 0 || p.cooldown_long > 0;
+    return true;
+  });
+
+  grid.innerHTML = filtered.map(p => { try { return buildCard(p, alerts, trades, changes); } catch(e) { console.error('[buildCard] ' + (p?.symbol||'?'), e); return ''; } }).join('')
+    || '<div style="padding:40px;color:#333;text-align:center;grid-column:1/-1;">No pairs match filter</div>';
+}
+
+function buildCard(p, alerts, trades, changes) {
+  const sym    = p.symbol;
+  const price  = p.price   || 0;
+  const j15m   = p.j15m    || 0;
+  const j1h    = p.j1h     || 0;
+  const rsi15m = p.rsi15m  || 0;
+  const bidPct = p.bid_pct || 0;
+  const askPct = p.ask_pct || 0;
+  const adx1h  = p.adx1h   || 0;
+  const stochK     = p.stoch_k      ?? null;
+  const stochD     = p.stoch_d      ?? null;
+  const stochKPrev = p.stoch_k_prev ?? null;
+  const stochDPrev = p.stoch_d_prev ?? null;
+  const cdS    = p.cooldown_short || 0;
+  const cdL    = p.cooldown_long  || 0;
+  const inTrade = p.in_trade;
+  const chg    = changes[sym] ?? null;
+
+  let chgHtml = '';
+  if (chg !== null) {
+    const chgColor = chg >= 0 ? '#00ff88' : '#ff4444';
+    chgHtml = `<span class="card-chg" style="color:${chgColor}">${chg >= 0 ? '+' : ''}${chg.toFixed(2)}%</span>`;
+  }
+
+  const adxFade  = adx1h > ADX_FADE_MAX;
+  const adxColor = adxFade     ? '#ff4444'
+                 : adx1h >= 50 ? '#00ff88'
+                 : adx1h >= 25 ? '#ffaa00'
+                 : '#ffffff';
+
+  // Gate counts
+  const shortGates = [j15m > 80, j1h > 60, stochK !== null && stochD !== null && stochK > 75 && stochK < stochD, askPct >= 55];
+  const longGates  = [j15m < 20, j1h < 40, stochK !== null && stochD !== null && stochK < 25 && stochK > stochD, bidPct >= 55];
+  const shortCount = shortGates.filter(Boolean).length;
+  const longCount  = longGates.filter(Boolean).length;
+  const shortFull  = shortCount === 4;
+  const longFull   = longCount  === 4;
+  const diverge    = shortCount === longCount && !shortFull;
+  const showShort  = shortCount >= longCount || diverge;
+  const showLong   = longCount  >= shortCount || diverge;
+  const leadCount  = Math.max(shortCount, longCount);
+  const nearTrig   = !shortFull && !longFull && leadCount === 3;
+  const hasAlert   = alerts.some(a => a.symbol === sym);
+
+  // Confluence detection
+  const longConf   = j15m < 20 && j1h < 40;
+  const shortConf  = j15m > 80 && j1h > 60;
+  const isConf     = longConf || shortConf;
+  const confIsLong = longConf;
+
+  // ── Card glow — unified trend-based ──────────────────────────────────────────
+  const cardCls = 'pair-card';
+  let glowStyle;
+  const trend = p.trend || 'Neutral';
+  if (inTrade) {
+    glowStyle = 'border:1px solid rgba(41,121,255,0.6);box-shadow:0 0 20px rgba(41,121,255,0.15),0 2px 8px rgba(0,0,0,0.6)';
+  } else if (trend === 'Strong Bull') {
+    glowStyle = 'border:1px solid rgba(34,197,94,0.5);box-shadow:0 0 12px 3px rgba(34,197,94,0.7),0 2px 8px rgba(0,0,0,0.6)';
+  } else if (trend === 'Bullish') {
+    glowStyle = 'border:1px solid rgba(34,197,94,0.3);box-shadow:0 0 8px 2px rgba(34,197,94,0.4),0 2px 8px rgba(0,0,0,0.6)';
+  } else if (trend === 'Strong Bear') {
+    glowStyle = 'border:1px solid rgba(239,68,68,0.5);box-shadow:0 0 12px 3px rgba(239,68,68,0.7),0 2px 8px rgba(0,0,0,0.6)';
+  } else if (trend === 'Bearish') {
+    glowStyle = 'border:1px solid rgba(239,68,68,0.3);box-shadow:0 0 8px 2px rgba(239,68,68,0.4),0 2px 8px rgba(0,0,0,0.6)';
+  } else {
+    glowStyle = 'border:1px solid rgba(255,255,255,0.1);box-shadow:none';
+  }
+  // ── Symbol class for confluence name glow ────────────────────────────────────
+  const symCls = (trend === 'Strong Bull' || trend === 'Bullish') ? 'card-sym card-sym-conf-long'
+               : (trend === 'Strong Bear' || trend === 'Bearish') ? 'card-sym card-sym-conf-short'
+               : 'card-sym';
+
+  // ── Inline direction rows: arrow + 4 gate dots + J15M/J1H values ─────────────
+  function dotRowJ(dir, gateArr) {
+    const isL    = dir === 'LONG';
+    const arrow  = isL ? '▲' : '▼';
+    const arCls  = isL ? 'arrow-long' : 'arrow-short';
+    const pfx    = isL ? 'long' : 'short';
+    const dots   = gateArr.map(g => `<span class="gc-dot ${pfx}-${g ? 'pass' : 'fail'}"></span>`).join('');
+    const j15Col = isL ? (j15m < 20 ? '#00e676' : '#555') : (j15m > 80 ? '#ff3d57' : '#555');
+    const j1hCol = isL ? (j1h  < 40 ? '#00e676' : '#555') : (j1h  > 60 ? '#ff3d57' : '#555');
+    return `<div class="sym-dir-row">
+      <span class="dir-arrow ${arCls}">${arrow}</span>
+      <div class="gate-cluster">${dots}</div>
+      <span class="j-inline"><span style="color:${j15Col}">${j15m.toFixed(0)}</span><span class="j-slash">/</span><span style="color:${j1hCol}">${j1h.toFixed(0)}</span></span>
+    </div>`;
+  }
+
+  let inlineDir = '';
+  if (diverge && shortCount > 0) {
+    inlineDir = `<div class="sym-dir-wrap">${dotRowJ('SHORT', shortGates)}${dotRowJ('LONG', longGates)}</div>`;
+  } else if (shortCount > longCount) {
+    inlineDir = `<div class="sym-dir-wrap">${dotRowJ('SHORT', shortGates)}</div>`;
+  } else if (longCount > shortCount) {
+    inlineDir = `<div class="sym-dir-wrap">${dotRowJ('LONG', longGates)}</div>`;
+  }
+
+  // ── Gate rows: RSI + DEPTH only (J moved to symbol line) ─────────────────────
+  let rows = '';
+  if (showShort) rows += dirRow('SHORT', stochK, stochD, rsi15m, askPct);
+  if (showLong)  rows += dirRow('LONG',  stochK, stochD, rsi15m, bidPct);
+
+  // ── Confluence mini bars (RSI + Depth) — shown only on confluence cards ───────
+  let confBars = '';
+  if (isConf) {
+      const depthPct   = confIsLong ? bidPct : askPct;
+      const depthLabel = confIsLong ? 'BID' : 'ASK';
+      const depthPass   = confIsLong ? (bidPct >= 55) : (askPct >= 55);
+      const stochPass   = confIsLong ? longGates[2] : shortGates[2];
+      const stochKCol   = stochK !== null ? (confIsLong ? (stochK < 25 ? '#00e676' : '#555') : (stochK > 75 ? '#ff3d57' : '#555')) : '#555';
+      const stochDotCls = stochPass ? (confIsLong ? 'long-pass' : 'short-pass') : (confIsLong ? 'long-fail' : 'short-fail');
+      const dptDotCls  = depthPass ? (confIsLong ? 'long-pass' : 'short-pass') : (confIsLong ? 'long-fail' : 'short-fail');
+      const fillPct    = Math.min(100, Math.max(0, depthPct));
+      const fillColor  = confIsLong
+        ? (depthPass ? 'rgba(0,230,118,0.7)' : 'rgba(0,230,118,0.25)')
+        : (depthPass ? 'rgba(255,61,87,0.7)'  : 'rgba(255,61,87,0.25)');
+      const fillStyle  = confIsLong
+        ? `left:0;width:${fillPct}%;background:${fillColor}`
+        : `right:0;width:${fillPct}%;background:${fillColor}`;
+      const gateLinePct = confIsLong ? 55 : 45;
+
+      const stochBarHtml = stochK !== null && stochD !== null ? (() => {
+        const stochKPct2 = Math.min(99, Math.max(0, stochK));
+        const stochDPct2 = Math.min(99, Math.max(0, stochD));
+        const stochEcl   = Math.abs(stochK - stochD) < 5;
+        const stochDBrd  = stochEcl ? '1px solid #00ff88' : '1px solid rgba(136,136,136,0.7)';
+        const stochDGlw  = stochEcl ? '0 0 5px rgba(0,255,136,0.4)' : 'none';
+        return `<div class="cbar-track" style="position:relative">
+          <div class="cbar-zg" style="width:25%"></div>
+          <div class="cbar-zr" style="left:75%;width:25%"></div>
+          <div class="cbar-thresh cbar-thresh-l" style="left:25%"></div>
+          <div class="cbar-thresh cbar-thresh-r" style="left:75%"></div>
+          <div class="cbar-cursor" style="left:${stochKPct2}%;background:${stochKCol};box-shadow:0 0 5px ${stochKCol}"></div>
+          <div style="position:absolute;top:50%;transform:translate(-50%,-50%);left:${stochDPct2}%;width:10px;height:10px;border-radius:2px;border:${stochDBrd};background:transparent;pointer-events:none;box-shadow:${stochDGlw}"></div>
+        </div><span style="font-size:9px;color:#555;margin-left:3px">${rsi15m.toFixed(0)}</span>`;
+      })() : `<span style="color:#555;font-size:11px;margin-left:6px">—</span><span style="font-size:9px;color:#555;margin-left:3px">${rsi15m.toFixed(0)}</span>`;
+
+      confBars = `<div class="cbar-row">
+        <span class="gc-dot cbar-dot ${stochDotCls}"></span>
+        <span class="cbar-label">STOCH</span>
+        ${stochBarHtml}
+      </div>
+      <div class="cbar-row">
+        <span class="gc-dot cbar-dot ${dptDotCls}"></span>
+        <span class="cbar-label">${depthLabel}</span>
+        <div class="cbar-track">
+          <div class="cbar-fill" style="${fillStyle}"></div>
+          <div class="cbar-thresh" style="left:${gateLinePct}%;border-color:rgba(255,170,0,0.5)"></div>
+        </div>
+        <span class="cbar-val">${depthPct.toFixed(0)}%</span>
+      </div>`;
+    }
+
+  // ── Pills / readiness ─────────────────────────────────────────────────────────
+  let pills = '';
+  if (isConf) {
+    const gateArr = confIsLong ? longGates : shortGates;
+    const passing  = gateArr.filter(Boolean).length;
+    const rdyCls   = confIsLong ? 'pill-ready-long' : 'pill-ready-short';
+    if      (passing === 4) pills = `<span class="pill ${rdyCls}">✦ READY</span>`;
+    else if (passing === 3) pills = `<span class="pill pill-near-rdy">NEAR 3/4</span>`;
+    else                    pills = `<span class="pill pill-partial">PARTIAL ${passing}/4</span>`;
+  } else {
+    if (inTrade)   pills += `<span class="pill pill-intrade">IN TRADE</span>`;
+    if (cdS > 0)   pills += `<span class="pill pill-cd">CD-S ${fmtCd(cdS)}</span>`;
+    if (cdL > 0)   pills += `<span class="pill pill-cd">CD-L ${fmtCd(cdL)}</span>`;
+    if (diverge)   pills += `<span class="pill pill-diverge">DIVERGENCE</span>`;
+    if (nearTrig)  pills += `<span class="pill pill-near">NEAR TRIGGER</span>`;
+    if (adxFade)   pills += `<span class="pill pill-adxmax">ADX ${adx1h.toFixed(0)} FADE MAX</span>`;
+    // Session halt + large SL CD pills
+    const _sess      = STATE.session || '';
+    const _sHaltL    = p.session_halted_long;
+    const _sHaltS    = p.session_halted_short;
+    const _lgCDL     = p.large_sl_cd_long  || 0;
+    const _lgCDS     = p.large_sl_cd_short || 0;
+    if (_sHaltL) pills += `<span class="pill pill-halted">LONG HALTED — ${_sess}</span>`;
+    if (_sHaltS) pills += `<span class="pill pill-halted">SHORT HALTED — ${_sess}</span>`;
+    if (!_sHaltL && _lgCDL > 0) pills += `<span class="pill pill-cd-large">COOLDOWN ${fmtCd(_lgCDL)}</span>`;
+    if (!_sHaltS && _lgCDS > 0) pills += `<span class="pill pill-cd-large">COOLDOWN ${fmtCd(_lgCDS)}</span>`;
+    if (shortFull && hasAlert) pills += `<span class="pill pill-alert-s">▼ ALERT</span>`;
+    if (longFull  && hasAlert) pills += `<span class="pill pill-alert">▲ ALERT</span>`;
+  }
+
+  return `<div class="${cardCls}" style="${glowStyle}">
+    <div class="card-top">
+      <div class="card-sym-block">
+        <span class="${symCls}" style="cursor:pointer" onclick="openPairOverlay('${sym}')">${sym}</span>
+        ${inlineDir}
+      </div>
+      <div class="card-right">
+        <div class="card-price-line">
+          <span class="card-price">${fmtPrice(price)}</span>${chgHtml}<span class="card-price-cd price-cd-val">${_priceCdSec}s</span>
+        </div>
+      </div>
+    </div>
+    <div class="card-adx-compact"><span class="adx-cl">ADX</span><span class="adx-cv" style="color:${adxColor}">${adx1h.toFixed(1)}</span><span class="card-meta-sep">·</span><span class="adx-cl">J15M</span><span class="adx-cv" style="color:${j15m < 20 ? '#00ff88' : j15m > 80 ? '#ff4444' : '#fff'}">${j15m.toFixed(0)}</span><span class="card-meta-sep">·</span><span class="adx-cl">J1H</span><span class="adx-cv" style="color:${j1h < 40 ? '#00ff88' : j1h > 60 ? '#ff4444' : '#fff'}">${j1h.toFixed(0)}</span></div>
+    ${rows}
+    ${confBars}
+    <div class="card-footer">${pills || `<span class="pill pill-scanning">SCANNING</span>`}</div>
+  </div>`;
+}
+
+function dirRow(direction, stochK, stochD, rsi15m, depthPct) {
+  const isLong     = direction === 'LONG';
+  const depthLabel = isLong ? 'BID' : 'ASK';
+  const rowCls     = isLong ? 'long-row' : 'short-row';
+  const stochColor = stochK === null ? 'grey' : (isLong ? (stochK < 25 ? 'green' : 'grey') : (stochK > 75 ? 'red' : 'grey'));
+  const depthColor = depthPct >= 55 ? (isLong ? 'green' : 'red') : 'grey';
+
+  return `<div class="dir-row ${rowCls}">
+    <div class="dir-vals">
+      <div class="dv-item">
+        <span class="dv-label">STOCH</span>
+        <span class="dv-val ${stochColor}">${stochK !== null && stochD !== null ? stochK.toFixed(1) + '/' + stochD.toFixed(1) : '—'}</span><span style="font-size:9px;color:#555;margin-left:3px">RSI${rsi15m.toFixed(0)}</span>
       </div>
       <div class="dv-item">
         <span class="dv-label">${depthLabel}</span>
@@ -521,7 +1091,7 @@ function renderBanner() {
         ? (j < 20 ? '#00e676' : j < 35 ? 'rgba(0,230,118,0.5)' : j < 65 ? 'rgba(255,255,255,0.4)' : j < 80 ? 'rgba(255,61,87,0.5)' : '#ff3d57')
         : (j < 40 ? '#00e676' : j < 50 ? 'rgba(0,230,118,0.5)' : j < 60 ? 'rgba(255,255,255,0.4)' : j < 70 ? 'rgba(255,61,87,0.5)' : '#ff3d57');
       const pulseCls   = isConf ? ' cb-conf' : '';
-      const extraBot   = row * 12;
+      const extraBot   = row * 16;
       return `<div class="cb-chip${pulseCls}" style="left:${j.toFixed(1)}%;bottom:${extraBot}px;color:${col}">${sym}${isConf ? '✦' : ''}<div class="cb-tick"></div></div>`;
     }).join('');
   }
@@ -827,7 +1397,7 @@ function buildPosCard(t, prices, pairStates) {
   // Scan narrative
   const jTr  = j15m > 60 ? 'rising' : j15m < 40 ? 'falling' : 'flat';
   const narr = ps.symbol
-    ? `SCAN  J ${(+j15m).toFixed(1)}  ${dLbl} ${(+dPct).toFixed(1)}%  ADX ${(+adx).toFixed(1)}  RSI ${(+rsi).toFixed(1)}  K/D ${(+sK).toFixed(0)}/${(+sD).toFixed(0)}  J ${jTr}`
+    ? `SCAN  J ${(+j15m).toFixed(1)}  ${dLbl} ${(+dPct).toFixed(1)}%  ADX ${(+adx).toFixed(1)}  RSI ${(+rsi).toFixed(1)}  K/D ${(+sKtoFixed(1)}/${(+sD).toFixed(1)}  J ${jTr}`
     : 'SCAN  awaiting next scan…';
 
   const tid      = `pct-${sym}-${t.direction}`;
@@ -1502,7 +2072,7 @@ function _ovGateBarsHtml(d, dir) {
       <span class="pov-gv" id="pov-gv-1" style="color:${j1hCol}">${j1h.toFixed(0)}</span>
     </div>
     <div class="pov-gr" data-gi="2">
-      <div class="${dotCls(gArr[2])}" id="pov-gd-2"></div>
+      <div class="${dotCls(isL ? (stochK2!==null&&stochD2!==null&&stochK2<25&&stochK2>stochD2) : (stochK2!==null&&stochD2!==null&&stochK2>75&&stochK2<stochD2))}" id="pov-gd-2"></div>
       <span class="pov-gn">STOCH</span>
       <div class="pov-gt" style="position:relative">
         <div class="pov-gzg" style="width:25%"></div>
@@ -1511,7 +2081,7 @@ function _ovGateBarsHtml(d, dir) {
         ${stochK2 !== null ? `<div class="pov-gcur" id="pov-gc-2k" style="left:${Math.min(99,stochK2).toFixed(1)}%;background:${stochKC2}"></div>` : ''}
         ${stochD2 !== null ? `<div id="pov-gc-2d" style="position:absolute;top:50%;transform:translate(-50%,-50%);left:${Math.min(99,stochD2).toFixed(1)}%;width:10px;height:10px;border-radius:2px;border:${stochD2 !== null && Math.abs(stochK2-stochD2) < 5 ? '1px solid #00ff88' : '1px solid rgba(136,136,136,0.7)'};background:transparent;pointer-events:none;box-shadow:${stochD2 !== null && Math.abs(stochK2-stochD2) < 5 ? '0 0 5px rgba(0,255,136,0.4)' : 'none'}"></div>` : ''}
       </div>
-      <span class="pov-gv" id="pov-gv-2" style="color:${stochKC2}">${stochK2 !== null && stochD2 !== null ? stochK2.toFixed(0) + '/' + stochD2.toFixed(0) : '—'}</span>
+      <span class="pov-gv" id="pov-gv-2" style="color:${stochKC2}">${stochK2 !== null && stochD2 !== null ? stochK2.toFixed(1) + '/' + stochD2.toFixed(1) : '—'}</span>
     </div>
     <div class="pov-gr" data-gi="rsi">
       <div class="pov-gd pov-gd-fail" style="opacity:0.25"></div>
@@ -1823,11 +2393,14 @@ function _ovUpdate(pn, d) {
     }
   }
   const gv2 = document.getElementById('pov-gv-2');
-  if (gv2 && stochKU !== null && stochDU !== null) { gv2.textContent = `${stochKU.toFixed(0)}/${stochDU.toFixed(0)}`; gv2.style.color = stochKCU; }
+  if (gv2 && stochKU !== null && stochDU !== null) { gv2.textContent = `${stochKU.toFixed(1)}/${stochDU.toFixed(1)}`; gv2.style.color = stochKCU; }
   const gd2 = document.getElementById('pov-gd-2');
   if (gd2) {
-    gd2.className = dotPassCls(curGates[2]);
-    if (_ovPrevGates && _ovPrevGates[2] !== curGates[2]) {
+    const liveStochGate = isL
+      ? (stochKU !== null && stochDU !== null && stochKU < 25 && stochKU > stochDU)
+      : (stochKU !== null && stochDU !== null && stochKU > 75 && stochKU < stochDU);
+    gd2.className = dotPassCls(liveStochGate);
+    if (_ovPrevGates && _ovPrevGates[2] !== undefined && liveStochGate !== !!_ovPrevGates[2]) {
       gd2.classList.add('pov-gd-flash');
       setTimeout(() => gd2.classList.remove('pov-gd-flash'), 350);
     }

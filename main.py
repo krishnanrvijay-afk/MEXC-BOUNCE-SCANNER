@@ -50,7 +50,7 @@ import scanner as _scanner_mod  # direct access to _cooldowns dict for persisten
 TELEGRAM_BOT_TOKEN  = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID    = int(os.environ.get("TELEGRAM_CHAT_ID", "0") or "0")
 TELEGRAM_ENABLED    = os.environ.get("TELEGRAM_ENABLED", "true").lower() == "true"
-_pending_reminders: dict = {}
+_digest_task = None  # type: ignore
 _stale_tg_sent: set[str] = set()  # symbols for which stale-price TG alert was already sent
 _session_sl_counts: dict[str, int]   = {}    # "SYMBOL_DIRECTION_SESSION" -> SL count
 _session_halted:    set[str]         = set() # "SYMBOL_DIRECTION_SESSION" halted for session
@@ -657,126 +657,111 @@ def _tg_post(msg: str) -> None:
 
 
 def send_telegram(alert: dict) -> None:
-    """Build and send the HTML signal message for a new alert."""
+    """Build and send the compact entry alert."""
     sym       = alert.get("symbol", "")
     direction = alert.get("direction", "LONG")
     tier      = alert.get("tier", "REGULAR")
-    score     = alert.get("score", 0)
-    trend     = alert.get("trend", "Neutral")
     j15m      = float(alert.get("j15m", 0) or 0)
     j1h       = float(alert.get("j1h",  0) or 0)
-    adx       = float(alert.get("adx1h", 0) or 0)
     bid_pct   = float(alert.get("bid_pct", 0) or 0)
     ask_pct   = float(alert.get("ask_pct", 0) or 0)
     entry     = float(alert.get("entry_price", 0) or 0)
     sl        = float(alert.get("sl_price", 0) or 0)
     tp1       = float(alert.get("tp1_price", 0) or 0)
-    tp2       = float(alert.get("tp2_price", 0) or 0)
     leverage  = int(alert.get("leverage", 5) or 5)
     margin    = float(alert.get("margin", MARGIN_PER_TRADE) or MARGIN_PER_TRADE)
-    session   = alert.get("session", "—") or "—"
 
-    tier_map    = {"HIGH_PROB": "✦ HIGH PROB", "STRONG": "◆ STRONG"}
-    tier_label  = tier_map.get(tier, "● REGULAR")
-    trend_emoji = _TREND_EMOJI.get(trend, "➡️")
+    tier_map  = {"HIGH_PROB": "\u29BF", "STRONG": "\u25C6"}
+    tier_icon = tier_map.get(tier, "\u25CF")
 
-    sess_lo = session.lower()
-    if "asia" in sess_lo:                          session_emoji = "🌏"
-    elif "london" in sess_lo:                      session_emoji = "🌍"
-    elif "ny" in sess_lo or "new york" in sess_lo: session_emoji = "🌎"
-    else:                                          session_emoji = "🌑"
+    is_long      = direction == "LONG"
+    size         = (margin * leverage / entry) if entry else 0
+    full_sl_pnl  = ((sl  - entry) * size) if is_long else ((entry - sl)  * size)
+    full_tp1_pnl = ((tp1 - entry) * size) if is_long else ((entry - tp1) * size)
+    max_loss      = abs(full_sl_pnl)
+    tp1_profit_70 = abs(full_tp1_pnl) * 0.70
 
-    is_long  = direction == "LONG"
-    size     = (margin * leverage / entry) if entry else 0
-    tp1_pnl  = ((tp1 - entry) * size) if is_long else ((entry - tp1) * size)
-    tp2_pnl  = ((tp2 - entry) * size) if is_long else ((entry - tp2) * size)
-    sl_pnl   = ((sl  - entry) * size) if is_long else ((entry - sl)  * size)
-    sl_dist  = abs(entry - sl)
-    d_risk   = margin * leverage * (sl_dist / entry) if entry else margin
-    rr       = round(abs(tp1_pnl) / d_risk, 2) if d_risk else 0
-    liq      = (entry - margin / size) if (is_long and size) else \
-               (entry + margin / size) if size else 0
-    adx_lbl  = "Trending" if adx >= 25 else "Ranging"
-    dir_lbl  = "Open Long" if is_long else "Open Short"
-    ts       = datetime.now(_EDT).strftime("%Y-%m-%d %H:%M EDT")
+    cross_arrow = "\u2191" if is_long else "\u2193"
 
-    parts = [
-        f"<b>{tier_label} {direction} — {sym}</b>",
-        f"Score: {score}/4",
-        f"Trend: {trend_emoji} {trend}",
-        f"J15M: {j15m:.1f}",
-        f"J1H: {j1h:.1f}",
-        "📊 ADX: " + f"{adx:.1f} — {adx_lbl}",
-        f"Depth: B{bid_pct:.0f}% / S{ask_pct:.0f}%",
-        f"Session: {session_emoji} {session} +0",
-        "━━━ ORDER SETUP ━━━",
-        f"Direction:   {dir_lbl}",
-        f"Entry:       {_fmt_p(entry)}",
-        f"Cost:        {margin:.0f} USDT",
-        f"Leverage:    {leverage}x (Isolated)",
-        f"TP1:         {_fmt_p(tp1)}",
-        f"TP2:         {_fmt_p(tp2)}",
-        f"SL:          {_fmt_p(sl)}",
-        "━━━ RISK SUMMARY ━━━",
-        "Est. Profit TP1: $" + f"{tp1_pnl:.2f}" + " net",
-        "Est. Profit TP2: $" + f"{tp2_pnl:.2f}" + " net",
-        "Max Loss:        $" + f"{sl_pnl:.2f}"  + " net",
-        f"R:R:             1:{rr}",
-        f"Liq Price:       ~{_fmt_p(liq)}",
-        "⏱ " + ts,
-    ]
-    _tg_post("\n".join(parts))
-
-
-def send_reminder(alert: dict, cancel_event: threading.Event) -> None:
-    """Sleep 30 min (in chunks), then send a reminder unless cancelled."""
-    sym       = alert.get("symbol", "")
-    direction = alert.get("direction", "LONG")
-    sl        = float(alert.get("sl_price", 0) or 0)
-    tp1       = float(alert.get("tp1_price", 0) or 0)
-    tp2       = float(alert.get("tp2_price", 0) or 0)
-    fired_at  = alert.get("fired_at", int(time.time()))
-    orig_time = datetime.fromtimestamp(fired_at, tz=_EDT).strftime("%H:%M EDT")
-
-    elapsed = 0
-    while elapsed < 1800 and not cancel_event.is_set():
-        time.sleep(10)
-        elapsed += 10
-
-    if cancel_event.is_set():
-        return
-
-    live_price = app_state.prices.get(sym, 0)
-    key        = f"{sym}{direction}"
-
-    if key in app_state.open_trades:
-        status = "✅ ACTIVE"
+    if bid_pct >= ask_pct:
+        depth_pct  = bid_pct
+        depth_side = "B"
     else:
-        closed = next(
-            (e for e in reversed(app_state.trade_log)
-             if e["symbol"] == sym and e["direction"] == direction), None
-        )
-        if closed:
-            reason = closed.get("exit_reason", "")
-            if reason == "SL":
-                status = "🔴 SL Breached"
-            elif reason in ("TP2", "HC_PARTIAL_1.5R"):
-                status = "✅ TP2 Reached"
-            else:
-                status = "Closed (" + reason + ")"
-        else:
-            status = "✅ ACTIVE"
+        depth_pct  = ask_pct
+        depth_side = "S"
 
-    ts  = datetime.now(_EDT).strftime("%Y-%m-%d %H:%M EDT")
+    ts = datetime.now(_EDT).strftime("%I:%M %p ET").lstrip("0")
+
     msg = (
-        "⏰ REMINDER — " + sym + " " + direction + "\n"
-        "Alert sent 30 min ago at " + orig_time + "\n"
-        "Current price: " + _fmt_p(live_price) + "\n"
-        "SL: " + _fmt_p(sl) + " | TP1: " + _fmt_p(tp1) + " | TP2: " + _fmt_p(tp2) + "\n"
-        "Status: " + status + "\n"
-        "⏱ " + ts
+        f"\U0001F7E0  MEXC \u00B7 {direction} {sym} \u00B7 {leverage}x {tier_icon}\n"
+        "\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n"
+        f"ENTRY  {_fmt_p(entry)}\n"
+        f"SL     {_fmt_p(sl)}   \u2212${max_loss:.2f}\n"
+        f"TP1    {_fmt_p(tp1)}   +${tp1_profit_70:.2f} (70%)\n"
+        "       runner trails after\n"
+        "\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n"
+        f"J {j15m:.0f}/{j1h:.0f} \u00B7 K{cross_arrow}D \u00B7 depth {depth_pct:.0f}%{depth_side}\n"
+        f"\u23F1 {ts}"
     )
     _tg_post(msg)
+
+
+def _send_position_digest() -> None:
+    """Send a one-shot position digest to Telegram."""
+    trades = app_state.open_trades
+    if not trades:
+        return
+    n          = len(trades)
+    total_unrl = 0.0
+    pos_lines  = []
+    for key, trade in trades.items():
+        sym     = trade["symbol"]
+        d       = trade["direction"]
+        lev     = int(trade.get("leverage", 5) or 5)
+        entry   = float(trade.get("entry_price", 0) or 0)
+        tp1p    = float(trade.get("tp1_price", 0) or 0)
+        current = float(app_state.prices.get(sym, 0) or 0)
+        rem     = float(trade.get("remaining_size", trade.get("size", 0)) or 0)
+        if current and entry and rem:
+            upnl = (current - entry) * rem if d == "LONG" else (entry - current) * rem
+        else:
+            upnl = 0.0
+        total_unrl  += upnl
+        sl_dist      = float(trade.get("sl_dist") or abs(float(trade.get("sl_price", entry) or entry) - entry))
+        marg         = float(trade.get("margin", MARGIN_PER_TRADE) or MARGIN_PER_TRADE)
+        dollar_risk  = marg * lev * (sl_dist / entry) if entry else 0
+        r_val        = round(upnl / dollar_risk, 2) if dollar_risk else 0.0
+        near_flag = ""
+        if tp1p and current and entry:
+            tp1_dist = abs(tp1p - entry)
+            if tp1_dist > 0 and abs(current - tp1p) <= 0.20 * tp1_dist:
+                near_flag = " →TP1"
+        sl_label = "S" if d == "SHORT" else "L"
+        r_dir    = "↑" if r_val >= 0 else "↓"
+        pos_lines.append(
+            f"{sym}  {sl_label} {lev}x  "
+            f"{'+ ' if upnl >= 0 else '-'}${abs(upnl):.2f}  "
+            f"{r_dir}{abs(r_val)}R{near_flag}"
+        )
+    sign_unrl = "+" if total_unrl >= 0 else "-"
+    sign_day  = "+" if daily_pnl >= 0 else "-"
+    ts  = datetime.now(_EDT).strftime("%I:%M %p").lstrip("0")
+    msg = (
+        f"\U0001F7E0  MEXC \u00B7 {n} OPEN \u00B7 {sign_unrl}${abs(total_unrl):.2f} unrl\n"
+        "\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n"
+        + "\n".join(pos_lines) + "\n"
+        + "\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n"
+        + f"day {sign_day}${abs(daily_pnl):.2f} \u00B7 {ts}"
+    )
+    _tg_post(msg)
+
+
+async def _digest_loop() -> None:
+    """Send a position digest every 30 min while at least one position is open."""
+    await asyncio.sleep(1800)
+    while app_state.open_trades:
+        _send_position_digest()
+        await asyncio.sleep(1800)
 
 
 # ── Background loops ──────────────────────────────────────────────────────────
@@ -844,14 +829,13 @@ async def _scan_loop():
                     app_state.alerts.remove(existing)
                 app_state.alerts.insert(0, alert)
 
-                # Telegram alert + 30-min reminder
+                # Telegram alert + reset position digest timer
                 if TELEGRAM_ENABLED:
                     threading.Thread(target=lambda a=alert: send_telegram(a), daemon=True).start()
-                    ev = threading.Event()
-                    if sym in _pending_reminders:
-                        _pending_reminders[sym].set()
-                    _pending_reminders[sym] = ev
-                    threading.Thread(target=lambda a=alert, e=ev: send_reminder(a, e), daemon=True).start()
+                    global _digest_task
+                    if _digest_task is not None and not _digest_task.done():
+                        _digest_task.cancel()
+                    _digest_task = asyncio.create_task(_digest_loop())
 
                 # Auto-entry gate: blocked when live and LIVE_MANUAL_ENTRY_ONLY is True
                 if not PAPER_MODE and LIVE_MANUAL_ENTRY_ONLY:
@@ -1002,13 +986,14 @@ def _do_close_trade(key: str, trade: dict, exit_price: float, reason: str):
     print(f"[EXIT] {sym} {direction} closed at {exit_price} reason={reason} "
           f"pnl=${pnl:.2f} r={r:+.2f}R")
     if TELEGRAM_ENABLED:
-        def _exit_tg(r=reason, s=sym, d=direction, ep=exit_price, p=pnl):
+        def _exit_tg(r=reason, s=sym, d=direction, ep=exit_price, p=pnl, dp=daily_pnl):
+            sl_lbl = "S" if d == "SHORT" else "L"
             if r == "SL":
-                _tg_post("🔴 EXIT — " + s + " " + d + " — SL hit at " + _fmt_p(ep) + ". Final P&L: $" + f"{p:.2f}")
-            elif r == "TP2":
-                _tg_post("✅ TP2 HIT — " + s + " " + d + " — full close at " + _fmt_p(ep) + ". Final P&L: $" + f"{p:.2f}")
+                _tg_post("\u274C " + s + " " + sl_lbl + " \u00B7 SL at " + _fmt_p(ep)
+                         + "\n\u2212$" + f"{abs(p):.2f}" + " \u00B7 day " + ("+" if dp >= 0 else "-") + "$" + f"{abs(dp):.2f}")
             else:
-                _tg_post("📋 EXIT (" + r + ") — " + s + " " + d + " — closed at " + _fmt_p(ep) + ". P&L: $" + f"{p:.2f}")
+                _tg_post("\U0001F535 " + s + " " + sl_lbl + " \u00B7 closed (" + r + ") at " + _fmt_p(ep)
+                         + "\n" + ("+" if p >= 0 else "-") + "$" + f"{abs(p):.2f}")
         threading.Thread(target=_exit_tg, daemon=True).start()
     if PAPER_MODE:
         asyncio.create_task(_update_paper_trade_close(trade, exit_price, reason, pnl))
@@ -1052,7 +1037,9 @@ def _do_partial_close_tp1(key: str, trade: dict, exit_price: float):
           f"pnl=${pnl:.2f} r={r:+.2f}R — 30% runner open watching Trailblazer ATR trail")
     if TELEGRAM_ENABLED:
         def _tp1_tg(s=sym, d=direction, ep=exit_price, p=pnl):
-            _tg_post("✅ TP1 HIT — " + s + " " + d + " — partial close at " + _fmt_p(ep) + ". P&L so far: $" + f"{p:.2f}")
+            sl_lbl = "S" if d == "SHORT" else "L"
+            _tg_post("\u2705 " + s + " " + sl_lbl + " \u00B7 TP1 \u2014 70% out at " + _fmt_p(ep)
+                     + "\n+$" + f"{p:.2f}" + " banked \u00B7 runner trails")
         threading.Thread(target=_tp1_tg, daemon=True).start()
     _save_state()
 
@@ -1088,19 +1075,11 @@ def _do_trailblazer_close(key: str, trade: dict, exit_price: float,
           f"best price was {trail_best}, trail stop triggered at {trail_stop}")
     if TELEGRAM_ENABLED:
         import datetime as _dt
-        _ts = _dt.datetime.now(_dt.timezone(
-            _dt.timedelta(hours=-5))).strftime("%Y-%m-%d %H:%M EST")
-        def _trail_tg(s=sym, d=direction, ep=exit_price, p=pnl, rv=r,
-                      tb=trail_best, ts_=trail_stop, tp=total_pnl, ts_str=_ts):
-            _tg_post(
-                "🏃 TRAILBLAZER EXIT — " + s + " " + d + "\n"
-                + "Runner 30% closed at " + _fmt_p(ep) + "\n"
-                + "Best price reached: " + _fmt_p(tb) + "\n"
-                + "Trail stop triggered: " + _fmt_p(ts_) + "\n"
-                + "Runner P&L: $" + f"{p:.2f}" + " (" + f"{rv:+.2f}" + "R)\n"
-                + "Total trade P&L: $" + f"{tp:.2f}" + "\n"
-                + "⏱ " + ts_str
-            )
+        def _trail_tg(s=sym, d=direction, ep=exit_price, p=pnl, rv=r, tp=total_pnl):
+            sl_lbl = "S" if d == "SHORT" else "L"
+            ts_str = _dt.datetime.now(_dt.timezone(_dt.timedelta(hours=-4))).strftime("%I:%M %p ET").lstrip("0")
+            _tg_post("\U0001F3C3 " + s + " " + sl_lbl + " \u00B7 runner out at " + _fmt_p(ep)
+                     + "\n+" + f"${p:.2f}" + " \u00B7 trade total $" + f"{tp:.2f}" + " \u00B7 " + ts_str)
         threading.Thread(target=_trail_tg, daemon=True).start()
     _save_state()
 
@@ -1247,6 +1226,8 @@ async def lifespan(app: FastAPI):
     scan_task  = asyncio.create_task(_scan_loop())
     price_task = asyncio.create_task(_price_loop())
     exit_task  = asyncio.create_task(_exit_monitor_loop())
+    if _digest_task is not None and not _digest_task.done():
+        _digest_task.cancel()
     yield
     scan_task.cancel()
     price_task.cancel()

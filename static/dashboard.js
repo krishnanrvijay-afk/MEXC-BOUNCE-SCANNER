@@ -455,6 +455,7 @@ function buildCard(p, alerts, trades, changes) {
 
 function dirRow(direction, stochK, stochD, rsi15m, depthPct) {
   const isLong     = direction === 'LONG';
+  const depthLabel = isLong ? 'BID' : 'ASK';
   const rowCls     = isLong ? 'long-row' : 'short-row';
   const stochColor = stochK === null ? 'grey' : (isLong ? (stochK < 25 ? 'green' : 'grey') : (stochK > 75 ? 'red' : 'grey'));
   const depthColor = depthPct >= 55 ? (isLong ? 'green' : 'red') : 'grey';

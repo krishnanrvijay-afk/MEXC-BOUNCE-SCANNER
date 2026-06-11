@@ -2,25 +2,28 @@ import asyncio
 import time
 import logging
 from datetime import datetime, timezone
-from zoneinfo import ZoneInfo
 from typing import Optional
 
 from config import (
     PAIRS, J15M_SHORT_GATE, J15M_LONG_GATE, J1H_SHORT_MIN, J1H_LONG_MAX,
     RSI15M_SHORT_MIN, RSI15M_LONG_MAX, DEPTH_GATE_PCT, ATR_SL_MULTIPLIER,
-    TP1_R, LEVERAGE_HIGH, LEVERAGE_MID, LEVERAGE_LOW,
+    TP1_R, TP2_R, LEVERAGE_HIGH, LEVERAGE_MID, LEVERAGE_LOW,
     COOLDOWN_SECONDS, ADX_FADE_MAX, PAPER_MODE, CONSECUTIVE_LOSS_STOP,
     MIN_SL_PCT, MIN_SL_PCT_DEFAULT, MARGIN_PER_TRADE,
     PAIR_ADX_OVERRIDES,
 )
 
-TP2_R = 1.5  # reference price for dashboard display; exit replaced by TRAILBLAZER trail
-
 log = logging.getLogger("scanner")
+
+
+def _base(sym):
+    """Strip _USDT suffix for per-pair config lookups."""
+    return sym.removesuffix("_USDT")
 
 # ── Module-level state ────────────────────────────────────────────────────────
 
 _last_scores: dict[str, int]   = {}   # keyed "BTCSHORT" / "BTCLONG"
+_last_stoch:  dict[str, tuple] = {}   # keyed symbol → (stoch_k, stoch_d) from previous scan
 _cooldowns:   dict[str, float] = {}   # keyed "BTCSHORT" / "BTCLONG" → expiry ts
 _scan_count:  int              = 0
 _pending:     dict[str, dict]  = {}   # first-scan confirmed, awaiting 2nd
@@ -67,31 +70,27 @@ def _compute_rsi(candles: list[dict], period: int = 14) -> float:
     return 100 - 100 / (1 + avg_g / avg_l)
 
 
-def _compute_stoch(candles: list[dict], period: int = 14, smooth_k: int = 3, smooth_d: int = 3) -> tuple[float, float, float, float]:
-    """Slow stochastic 14,3,3 → (k, d, k_prev, d_prev)."""
+def _compute_stochastic(candles: list[dict], k_period: int = 14, slow_period: int = 3, d_period: int = 3) -> tuple[float, float]:
+    """Standard slow stochastic 14,3,3. Returns (%K slow, %D)."""
+    if len(candles) < k_period:
+        return 50.0, 50.0
     closes = [c["close"] for c in candles]
     highs  = [c["high"]  for c in candles]
     lows   = [c["low"]   for c in candles]
-    if len(closes) < period + smooth_k + smooth_d - 1:
-        return 50.0, 50.0, 50.0, 50.0
-    raw_k: list[float] = []
-    for i in range(period - 1, len(closes)):
-        h_n = max(highs[i - period + 1 : i + 1])
-        l_n = min(lows[i  - period + 1 : i + 1])
-        raw_k.append((closes[i] - l_n) / (h_n - l_n) * 100 if h_n != l_n else 50.0)
-    slow_k: list[float] = []
-    for i in range(smooth_k - 1, len(raw_k)):
-        slow_k.append(sum(raw_k[i - smooth_k + 1 : i + 1]) / smooth_k)
-    if len(slow_k) < smooth_d + 1:
-        return 50.0, 50.0, 50.0, 50.0
-    slow_d: list[float] = []
-    for i in range(smooth_d - 1, len(slow_k)):
-        slow_d.append(sum(slow_k[i - smooth_d + 1 : i + 1]) / smooth_d)
-    k      = slow_k[-1]
-    d      = slow_d[-1]
-    k_prev = slow_k[-2] if len(slow_k) >= 2 else k
-    d_prev = slow_d[-2] if len(slow_d) >= 2 else d
-    return k, d, k_prev, d_prev
+    k_raws = []
+    for i in range(k_period - 1, len(candles)):
+        h_n   = max(highs[i - k_period + 1 : i + 1])
+        l_n   = min(lows[i  - k_period + 1 : i + 1])
+        k_raw = (closes[i] - l_n) / (h_n - l_n) * 100 if h_n != l_n else 50.0
+        k_raws.append(k_raw)
+    if len(k_raws) < slow_period:
+        return 50.0, 50.0
+    k_slows = []
+    for i in range(slow_period - 1, len(k_raws)):
+        k_slows.append(sum(k_raws[i - slow_period + 1 : i + 1]) / slow_period)
+    if len(k_slows) < d_period:
+        return (round(k_slows[-1], 2) if k_slows else 50.0), 50.0
+    return round(k_slows[-1], 2), round(sum(k_slows[-d_period:]) / d_period, 2)
 
 
 def _compute_atr(candles: list[dict], period: int = 14) -> float:
@@ -205,8 +204,10 @@ def _leverage_tier(adx: float) -> tuple[str, int]:
     return "REGULAR", LEVERAGE_LOW
 
 
-def score_bounce_short(j15m, j1h, stoch_k, stoch_d, stoch_k_prev, stoch_d_prev, ask_pct, adx,
-                       j5m: float = 50.0, trend: str = "Neutral") -> tuple[int, str, int]:
+def score_bounce_short(j15m, j1h, rsi15m, ask_pct, adx,
+                       j5m: float = 50.0, trend: str = "Neutral",
+                       stoch_k: float = 50.0, stoch_d: float = 50.0,
+                       stoch_k_prev: float = 50.0, stoch_d_prev: float = 50.0) -> tuple[int, str, int]:
     tier, lev = _leverage_tier(adx)
     stoch_gate = stoch_k > 75 and stoch_k < stoch_d
     if not (j15m > J15M_SHORT_GATE and j1h > J1H_SHORT_MIN
@@ -220,8 +221,11 @@ def score_bounce_short(j15m, j1h, stoch_k, stoch_d, stoch_k_prev, stoch_d_prev, 
         lev, tier = min(25, max(lev, 10)), "HIGH_CONVICTION"
     return score, tier, lev
 
-def score_bounce_long(j15m, j1h, stoch_k, stoch_d, stoch_k_prev, stoch_d_prev, bid_pct, adx,
-                      j5m: float = 50.0, trend: str = "Neutral") -> tuple[int, str, int]:
+
+def score_bounce_long(j15m, j1h, rsi15m, bid_pct, adx,
+                      j5m: float = 50.0, trend: str = "Neutral",
+                      stoch_k: float = 50.0, stoch_d: float = 50.0,
+                      stoch_k_prev: float = 50.0, stoch_d_prev: float = 50.0) -> tuple[int, str, int]:
     tier, lev = _leverage_tier(adx)
     stoch_gate = stoch_k < 25 and stoch_k > stoch_d
     if not (j15m < J15M_LONG_GATE and j1h < J1H_LONG_MAX
@@ -262,18 +266,17 @@ def get_scan_count() -> int:
 def clear_all_scanner_state():
     global _scan_count
     _last_scores.clear()
+    _last_stoch.clear()
     _cooldowns.clear()
     _pending.clear()
     _scan_count = 0
 
 
 def get_session_name() -> str:
-    """Return current trading session name based on US Eastern time (DST-aware).
-    Boundaries (ET): ASIA 5pm-3am | EU 3am-12pm (incl EU/US overlap) | US 12pm-5pm
-    """
-    h = datetime.now(ZoneInfo("America/New_York")).hour
-    if h >= 17 or h < 3:  return "ASIA"
-    if 3  <= h < 12:       return "EU"
+    """Return current trading session name based on UTC hour."""
+    h = datetime.now(timezone.utc).hour
+    if h >= 17 or h < 8:  return "ASIA"
+    if 8  <= h < 12:       return "EU"
     if 12 <= h < 17:       return "US"
     return "OFF"
 
@@ -368,7 +371,9 @@ async def run_full_scan(client, market_health: Optional[dict] = None) -> list[di
             _, _, j1h  = _compute_kdj(candles_1h)
             rsi15m     = _compute_rsi(candles_15m)
             rsi1h      = _compute_rsi(candles_1h)
-            stoch_k, stoch_d, stoch_k_prev, stoch_d_prev = _compute_stoch(candles_15m)
+            stoch_k, stoch_d           = _compute_stochastic(candles_15m)
+            stoch_k_prev, stoch_d_prev = _last_stoch.get(symbol, (50.0, 50.0))
+            _last_stoch[symbol]        = (stoch_k, stoch_d)
             atr5m      = _compute_atr(candles_5m)
             atr15m     = _compute_atr(candles_15m)
             atr1h      = _compute_atr(candles_1h)
@@ -385,7 +390,7 @@ async def run_full_scan(client, market_health: Optional[dict] = None) -> list[di
 
             # ── SL distance (ATR base, floored by MIN_SL_PCT + session buffer) ───────────────────────────────────────────────────
             _sl_atr      = atr15m * ATR_SL_MULTIPLIER
-            _min_sl_pct  = MIN_SL_PCT.get(symbol, MIN_SL_PCT_DEFAULT)
+            _min_sl_pct  = MIN_SL_PCT.get(_base(symbol), MIN_SL_PCT_DEFAULT)
             _sess_buf    = get_session_sl_buffer()
             _min_sl_dist = price * (_min_sl_pct + _sess_buf)
             sl_dist      = max(_sl_atr, _min_sl_dist)
@@ -398,8 +403,8 @@ async def run_full_scan(client, market_health: Optional[dict] = None) -> list[di
                     continue
 
                 # ── Pair ADX override gate ────────────────────────
-                if symbol in PAIR_ADX_OVERRIDES:
-                    _adx_min = PAIR_ADX_OVERRIDES[symbol]
+                if _base(symbol) in PAIR_ADX_OVERRIDES:
+                    _adx_min = PAIR_ADX_OVERRIDES[_base(symbol)]
                     if adx1h < _adx_min:
                         log.info(f"[SKIP] {symbol} {direction} — "
                                  f"ADX {adx1h:.1f} below pair minimum {_adx_min}")
@@ -408,29 +413,45 @@ async def run_full_scan(client, market_health: Optional[dict] = None) -> list[di
                         continue
 
                 if direction == "SHORT":
-                    score, tier, lev = score_bounce_short(j15m, j1h, stoch_k, stoch_d, stoch_k_prev, stoch_d_prev, ask_pct, adx1h, j5m=j5m, trend=trend)
-                    gates_arr = [j15m > J15M_SHORT_GATE, j1h > J1H_SHORT_MIN,
-                                 stoch_k > 75 and stoch_k < stoch_d,
-                                 ask_pct >= DEPTH_GATE_PCT]
-                    log_gates = (f"j15m={j15m:.1f}(>{J15M_SHORT_GATE}) j1h={j1h:.1f}(>{J1H_SHORT_MIN}) "
-                                 f"stoch_k={stoch_k:.1f}>75 k<d={stoch_d:.1f} "
-                                 f"ask={ask_pct:.1f}%(>={DEPTH_GATE_PCT}%)")
-                    _gc = sum(gates_arr)
-                    if _gc == 3:
-                        _blocked = [lbl for lbl, g in zip(["J15M","J1H","STOCH","DEPTH"], gates_arr) if not g]
-                        log.info(f"[GATE3] {symbol} SHORT stoch_k={stoch_k:.1f} stoch_d={stoch_d:.1f} rsi={rsi15m:.1f} passed={gates_arr[2]} blocked_gates={_blocked}")
+                    g_j15m  = j15m > J15M_SHORT_GATE
+                    g_j1h   = j1h  > J1H_SHORT_MIN
+                    g_stoch = stoch_k > 75 and stoch_k < stoch_d
+
+                    g_depth = ask_pct >= DEPTH_GATE_PCT
+                    score, tier, lev = score_bounce_short(
+                        j15m, j1h, rsi15m, ask_pct, adx1h, j5m=j5m, trend=trend,
+                        stoch_k=stoch_k, stoch_d=stoch_d,
+                        stoch_k_prev=stoch_k_prev, stoch_d_prev=stoch_d_prev)
+                    log_gates = (f"j15m={j15m:.1f}(need>{J15M_SHORT_GATE}) "
+                                 f"j1h={j1h:.1f}(need>{J1H_SHORT_MIN}) "
+                                 f"stoch_k={stoch_k:.1f}/stoch_d={stoch_d:.1f}(need>75,k<d) "
+                                 f"ask={ask_pct:.1f}%(need>={DEPTH_GATE_PCT}%)")
                 else:
-                    score, tier, lev = score_bounce_long(j15m, j1h, stoch_k, stoch_d, stoch_k_prev, stoch_d_prev, bid_pct, adx1h, j5m=j5m, trend=trend)
-                    gates_arr = [j15m < J15M_LONG_GATE, j1h < J1H_LONG_MAX,
-                                 stoch_k < 25 and stoch_k > stoch_d,
-                                 bid_pct >= DEPTH_GATE_PCT]
-                    log_gates = (f"j15m={j15m:.1f}(<{J15M_LONG_GATE}) j1h={j1h:.1f}(<{J1H_LONG_MAX}) "
-                                 f"stoch_k={stoch_k:.1f}<25 k>d={stoch_d:.1f} "
-                                 f"bid={bid_pct:.1f}%(>={DEPTH_GATE_PCT}%)")
-                    _gc = sum(gates_arr)
-                    if _gc == 3:
-                        _blocked = [lbl for lbl, g in zip(["J15M","J1H","STOCH","DEPTH"], gates_arr) if not g]
-                        log.info(f"[GATE3] {symbol} LONG stoch_k={stoch_k:.1f} stoch_d={stoch_d:.1f} rsi={rsi15m:.1f} passed={gates_arr[2]} blocked_gates={_blocked}")
+                    g_j15m  = j15m < J15M_LONG_GATE
+                    g_j1h   = j1h  < J1H_LONG_MAX
+                    g_stoch = stoch_k < 25 and stoch_k > stoch_d
+
+                    g_depth = bid_pct >= DEPTH_GATE_PCT
+                    score, tier, lev = score_bounce_long(
+                        j15m, j1h, rsi15m, bid_pct, adx1h, j5m=j5m, trend=trend,
+                        stoch_k=stoch_k, stoch_d=stoch_d,
+                        stoch_k_prev=stoch_k_prev, stoch_d_prev=stoch_d_prev)
+                    log_gates = (f"j15m={j15m:.1f}(need<{J15M_LONG_GATE}) "
+                                 f"j1h={j1h:.1f}(need<{J1H_LONG_MAX}) "
+                                 f"stoch_k={stoch_k:.1f}/stoch_d={stoch_d:.1f}(need<25,k>d) "
+                                 f"bid={bid_pct:.1f}%(need>={DEPTH_GATE_PCT}%)")
+
+                # ── GATE3 log — every scan when >= 3 of 4 gates pass ────────────
+                _gate_list  = [g_j15m, g_j1h, g_stoch, g_depth]
+                _gate_count = sum(_gate_list)
+                _blocked    = [n for n, v in zip(["J15M", "J1H", "STOCH", "DEPTH"], _gate_list) if not v]
+                if _gate_count >= 3:
+                    log.info(
+                        f"[GATE3] {symbol} {direction} "
+                        f"stoch_k={stoch_k:.1f} stoch_d={stoch_d:.1f} rsi={rsi15m:.1f} "
+                        f"passed={'true' if _gate_count == 4 else 'false'} "
+                        f"blocked_gates={_blocked}"
+                    )
 
                 if score >= 4:
                     log.info(f"[SCORE] {symbol} {direction} gates=PASS score={score} {log_gates}")
@@ -501,9 +522,9 @@ async def run_full_scan(client, market_health: Optional[dict] = None) -> list[di
                     "j1h":          round(j1h, 2),
                     "j5m":          round(j5m, 2),
                     "rsi15m":       round(rsi15m, 2),
-                    "rsi1h":        round(rsi1h, 2),
                     "stoch_k":      round(stoch_k, 2),
                     "stoch_d":      round(stoch_d, 2),
+                    "rsi1h":        round(rsi1h, 2),
                     "atr15m":       round(atr15m, 6),
                     "adx1h":        round(adx1h, 2),
                     "bid_pct":      bid_pct,
@@ -522,7 +543,8 @@ async def run_full_scan(client, market_health: Optional[dict] = None) -> list[di
                 new_alerts.append(alert)
                 _pending.pop(key, None)
                 log.info(f"[ALERT] {symbol} {direction} tier={tier} lev={lev}x entry={price} "
-                         f"sl={sl_price} tp1={tp1_price} adx={adx1h:.1f} stoch_k={stoch_k:.1f} stoch_d={stoch_d:.1f} rsi={rsi15m:.1f}")
+                         f"sl={sl_price} tp1={tp1_price} adx={adx1h:.1f} "
+                         f"stoch_k={stoch_k:.1f} stoch_d={stoch_d:.1f} rsi={rsi15m:.1f}")
 
         except Exception as e:
             log.error(f"[SCAN] {symbol} error: {e}", exc_info=True)
@@ -547,7 +569,9 @@ async def scan_pair_state(client) -> list[dict]:
             _, _, j1h  = _compute_kdj(candles_1h)
             rsi15m     = _compute_rsi(candles_15m)
             rsi1h      = _compute_rsi(candles_1h)
-            stoch_k, stoch_d, stoch_k_prev, stoch_d_prev = _compute_stoch(candles_15m)
+            stoch_k, stoch_d           = _compute_stochastic(candles_15m)
+            stoch_k_prev, stoch_d_prev = _last_stoch.get(symbol, (50.0, 50.0))
+            _last_stoch[symbol]        = (stoch_k, stoch_d)
             atr15m     = _compute_atr(candles_15m)
             adx1h      = _compute_adx(candles_1h)
             ma10       = _compute_ma(candles_1h, 10)
@@ -556,8 +580,14 @@ async def scan_pair_state(client) -> list[dict]:
             trend      = _trend_from_ma(price, candles_5m, candles_15m, candles_1h, adx1h)
             bid_pct, ask_pct = _depth_pcts(book)
 
-            short_score, short_tier, short_lev = score_bounce_short(j15m, j1h, stoch_k, stoch_d, stoch_k_prev, stoch_d_prev, ask_pct, adx1h, j5m=j5m, trend=trend)
-            long_score,  long_tier,  long_lev  = score_bounce_long(j15m, j1h, stoch_k, stoch_d, stoch_k_prev, stoch_d_prev, bid_pct, adx1h, j5m=j5m, trend=trend)
+            short_score, short_tier, short_lev = score_bounce_short(
+                j15m, j1h, rsi15m, ask_pct, adx1h, j5m=j5m, trend=trend,
+                stoch_k=stoch_k, stoch_d=stoch_d,
+                stoch_k_prev=stoch_k_prev, stoch_d_prev=stoch_d_prev)
+            long_score,  long_tier,  long_lev  = score_bounce_long(
+                j15m, j1h, rsi15m, bid_pct, adx1h, j5m=j5m, trend=trend,
+                stoch_k=stoch_k, stoch_d=stoch_d,
+                stoch_k_prev=stoch_k_prev, stoch_d_prev=stoch_d_prev)
 
             states.append({
                 "symbol":      symbol,
@@ -566,11 +596,11 @@ async def scan_pair_state(client) -> list[dict]:
                 "j15m":        round(j15m, 2),
                 "j1h":         round(j1h, 2),
                 "rsi15m":      round(rsi15m, 2),
-                "rsi1h":       round(rsi1h, 2),
                 "stoch_k":     round(stoch_k, 2),
                 "stoch_d":     round(stoch_d, 2),
                 "stoch_k_prev": round(stoch_k_prev, 2),
                 "stoch_d_prev": round(stoch_d_prev, 2),
+                "rsi1h":       round(rsi1h, 2),
                 "atr15m":      round(atr15m, 6),
                 "adx1h":       round(adx1h, 2),
                 "bid_pct":     bid_pct,

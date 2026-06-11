@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
 
-PAIRS = ["ZEC_USDT", "SOL_USDT", "BTC_USDT", "ETH_USDT", "XRP_USDT", "DOGE_USDT", "SUI_USDT", "NEAR_USDT", "AVAX_USDT", "ARB_USDT"]
+PAIRS = ["ZEC_USDT","SOL_USDT","BTC_USDT","ETH_USDT","XRP_USDT","DOGE_USDT","SUI_USDT","NEAR_USDT","AVAX_USDT","ARB_USDT"]
 
 SCAN_INTERVAL_SECONDS  = 30
 PRICE_INTERVAL_SECONDS = 8
@@ -15,7 +15,7 @@ PAPER_MODE             = True
 # When PAPER_MODE is False and LIVE_MANUAL_ENTRY_ONLY is True, the scanner will
 # never automatically open a live exchange position. Alerts fire and the overlay
 # updates normally but all live trade entry requires deliberate human action via
-# the symbol overlay Open HL or Open MEXC buttons. SL and TP exits continue to
+# the symbol overlay Open MEXC buttons. SL and TP exits continue to
 # execute automatically once a trade is open. This is the required mode for live
 # trading. Only set LIVE_MANUAL_ENTRY_ONLY to False if you explicitly want fully
 # automated live entry on every signal.
@@ -32,11 +32,11 @@ RSI15M_LONG_MAX  = 40
 DEPTH_GATE_PCT   = 55
 
 ATR_SL_MULTIPLIER = 1.0
-TP1_CLOSE_PCT       = 0.70   # close 70% at TP1; 30% runner goes to TRAILBLAZER
-TRAIL_ATR_MULTIPLIER = 0.5    # trail stop distance = atr15m × this multiplier
 
-TP1_R = 1.0
-# TP2_R = 1.5  # unused — replaced by TRAILBLAZER ATR trail
+TP1_R                = 1.0
+TP1_CLOSE_PCT        = 0.70        # Trailblazer: close 70% at TP1 (runner 30% stays open)
+TP2_R                = 1.5         # still used for tp2_price alert calc; exit replaced by Trailblazer
+TRAIL_ATR_MULTIPLIER = 0.5         # trail_stop = trail_best ± (atr15m × TRAIL_ATR_MULTIPLIER)
 
 LEVERAGE_HIGH = 10
 LEVERAGE_MID  = 7

@@ -457,7 +457,6 @@ function dirRow(direction, stochK, stochD, rsi15m, depthPct) {
   const isLong     = direction === 'LONG';
   const rowCls     = isLong ? 'long-row' : 'short-row';
   const stochColor = stochK === null ? 'grey' : (isLong ? (stochK < 25 ? 'green' : 'grey') : (stochK > 75 ? 'red' : 'grey'));
-  const stochColor = isLong ? (stochK < 25 ? 'green' : 'grey') : (stochK > 75 ? 'red' : 'grey');
   const depthColor = depthPct >= 55 ? (isLong ? 'green' : 'red') : 'grey';
 
   return `<div class="dir-row ${rowCls}">
@@ -1820,6 +1819,8 @@ function _ovUpdate(pn, d) {
       const stochEclU = Math.abs(stochKU - stochDU) < 5;
       gc2d.style.border    = stochEclU ? '1px solid #00ff88' : '1px solid rgba(136,136,136,0.7)';
       gc2d.style.boxShadow = stochEclU ? '0 0 5px rgba(0,255,136,0.4)' : 'none';
+    }
+  }
   const gv2 = document.getElementById('pov-gv-2');
   if (gv2 && stochKU !== null && stochDU !== null) { gv2.textContent = `${stochKU.toFixed(0)}/${stochDU.toFixed(0)}`; gv2.style.color = stochKCU; }
   const gd2 = document.getElementById('pov-gd-2');

@@ -334,6 +334,24 @@ def _load_state():
         if dropped:
             print(f"[RESTORE] {dropped} expired cooldown(s) dropped")
 
+        # -- Sanitize phantom trade-log entries (null/zero exit_price or |R| > 10) --
+        _keep_log = []
+        _drop_log  = []
+        for _e in app_state.trade_log:
+            _ep = _e.get("exit_price") or 0
+            _rv = abs(_e.get("r_value") or 0)
+            if _ep > 0 and _rv <= 10:
+                _keep_log.append(_e)
+            else:
+                _drop_log.append(_e)
+        for _ph in _drop_log:
+            print(f"[SANITIZE] dropped phantom trade {_ph.get('symbol')} {_ph.get('direction')} "
+                  f"pnl={_ph.get('pnl_usd')} r={_ph.get('r_value')} exit_price={_ph.get('exit_price')}")
+        if _drop_log:
+            app_state.trade_log = _keep_log
+            print(f"[SANITIZE] {len(_drop_log)} phantom trade(s) removed from restored log")
+            _save_state()
+
         print(f"[RESTORE] complete â trades={len(app_state.open_trades)} "
               f"daily_pnl=${daily_pnl:.2f} cooldowns={len(_scanner_mod._cooldowns)} "
               f"cb={consecutive_losses}/{CONSECUTIVE_LOSS_STOP}")

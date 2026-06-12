@@ -234,7 +234,6 @@ def _save_state():
     try:
         data = {
             "id":                     1,
-            "exchange":               "MEXC",
             "saved_date":             datetime.now(timezone.utc).strftime("%Y-%m-%d"),
             "open_trades":            app_state.open_trades,
             "margin_deployed":        app_state.margin_deployed,

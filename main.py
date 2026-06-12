@@ -224,15 +224,17 @@ def _get_supabase() -> Optional[Client]:
     return _supabase
 
 
+
+
 def _save_state():
-    """Upsert full scanner state to Supabase mexc_scanner_state table (row id=2)."""
+    """Upsert full scanner state to Supabase mexc_scanner_state table (single row id=1)."""
     sb = _get_supabase()
     if sb is None:
         return
     try:
         data = {
-            "id":                     2,
-            "exchange":                "MEXC",
+            "id":                     1,
+            "exchange":               "MEXC",
             "saved_date":             datetime.now(timezone.utc).strftime("%Y-%m-%d"),
             "open_trades":            app_state.open_trades,
             "margin_deployed":        app_state.margin_deployed,
@@ -243,10 +245,11 @@ def _save_state():
             "cooldowns":              dict(_scanner_mod._cooldowns),
             "updated_at":             datetime.now(timezone.utc).isoformat(),
         }
-        sb.table("mexc_scanner_state").upsert(data).execute()
+        sb.table("mexc_scanner_state").upsert(data, on_conflict="id").execute()
+        n_trades = len(app_state.open_trades)
+        print(f"[STATE SAVED] trades={n_trades} positions={n_trades}")
     except Exception as _e:
-        print(f"[PERSIST] save error: {_e}")
-
+        print(f"[STATE SAVE FAILED] {_e}")
 
 def _load_state():
     """On startup: restore all state from Supabase."""
@@ -294,7 +297,7 @@ def _load_state():
             print(f"[RESTORE] trade log: {len(log_rows.data)} entries restored")
 
         # ── Scanner state ──────────────────────────────────────────────────────
-        result = sb.table("mexc_scanner_state").select("*").eq("id", 2).execute()
+        result = sb.table("mexc_scanner_state").select("*").eq("id", 1).execute()
         if not result.data:
             print("[RESTORE] No state row found — starting fresh")
             return
@@ -1209,6 +1212,14 @@ async def _exit_monitor_loop():
 # ── Lifespan ──────────────────────────────────────────────────────────────────
 
 @asynccontextmanager
+
+async def _state_heartbeat_loop():
+    """Saves state every 60 s while any position is open."""
+    while True:
+        await asyncio.sleep(60)
+        if app_state.open_trades:
+            _save_state()
+
 async def lifespan(app: FastAPI):
     global mexc_client
     mexc_client = MexcClient()
@@ -1226,12 +1237,14 @@ async def lifespan(app: FastAPI):
     scan_task  = asyncio.create_task(_scan_loop())
     price_task = asyncio.create_task(_price_loop())
     exit_task  = asyncio.create_task(_exit_monitor_loop())
+    state_task = asyncio.create_task(_state_heartbeat_loop())
     if _digest_task is not None and not _digest_task.done():
         _digest_task.cancel()
     yield
     scan_task.cancel()
     price_task.cancel()
     exit_task.cancel()
+    state_task.cancel()
     await mexc_client.close()
 
 

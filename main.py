@@ -1007,7 +1007,7 @@ def _check_stale_prices() -> None:
             _stale_tg_sent.add(sym)
             msg = (
                 f"⚠️ PRICE STALE — {sym} — "
-                f"no price for 2 consecutive scans. "
+                f"no price for 5 consecutive scans. "
                 f"Open trade at risk. Check manually."
             )
             print(f"[PRICE STALE] {sym} — Telegram alert sent")

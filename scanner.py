@@ -26,7 +26,8 @@ _last_stoch:  dict[str, tuple] = {}   # keyed symbol → (stoch_k, stoch_d) from
 _cooldowns:   dict[str, float] = {}   # keyed "BTCSHORT" / "BTCLONG" → expiry ts
 _scan_count:  int              = 0
 _pending:     dict[str, dict]  = {}   # first-scan confirmed, awaiting 2nd
-_stale_prices: set[str]        = set()  # symbols with 2 consecutive missing prices
+_stale_prices: set[str]        = set()  # symbols with 5+ consecutive missing prices
+_stale_counts: dict[str, int]  = {}     # per-symbol consecutive no-price scan counter
 
 
 # ── Indicator helpers ─────────────────────────────────────────────────────────
@@ -357,11 +358,17 @@ async def run_full_scan(client, market_health: Optional[dict] = None) -> list[di
                 await asyncio.sleep(2)
                 price = await client.get_price(symbol)
                 if not price or price == 0:
-                    log.warning(f"[PRICE STALE] {symbol} — two consecutive no price responses")
-                    _stale_prices.add(symbol)
+                    _stale_counts[symbol] = _stale_counts.get(symbol, 0) + 1
+                    if _stale_counts[symbol] >= 5:
+                        log.warning(f"[PRICE STALE] {symbol} — {_stale_counts[symbol]} consecutive scans with no price")
+                        _stale_prices.add(symbol)
+                    else:
+                        log.warning(f"[PRICE STALE] {symbol} — {_stale_counts[symbol]}/5 consecutive no-price scans")
                     continue
+                _stale_counts[symbol] = 0
                 _stale_prices.discard(symbol)
             else:
+                _stale_counts[symbol] = 0
                 _stale_prices.discard(symbol)
 
             # ── Indicators ────────────────────────────────────────────────────

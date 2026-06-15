@@ -2217,11 +2217,13 @@ let _mexcAccMasked = false;
 let _mexcAccData   = null;
 
 function mexcAccOpenCard() {
-  document.getElementById('mexc-acc-backdrop').classList.add('open');
+  const el = document.getElementById('mexc-acc-backdrop');
+  el.style.display = 'flex';
 }
 
 function mexcAccCloseCard() {
-  document.getElementById('mexc-acc-backdrop').classList.remove('open');
+  const el = document.getElementById('mexc-acc-backdrop');
+  el.style.display = 'none';
 }
 
 function mexcAccToggleMask(e) {

@@ -28,6 +28,12 @@ _scan_count:  int              = 0
 _pending:     dict[str, dict]  = {}   # first-scan confirmed, awaiting 2nd
 _stale_prices: set[str]        = set()  # symbols with 5+ consecutive missing prices
 _stale_counts: dict[str, int]  = {}     # per-symbol consecutive no-price scan counter
+_btc_j1h: float = 50.0
+BTC_CORRELATION: dict = {
+    "ETH": 0.94, "SOL": 0.86, "XRP": 0.84, "DOGE": 0.87,
+    "LINK": 0.82, "AVAX": 0.80, "SUI": 0.82, "NEAR": 0.78,
+    "WIF": 0.65, "ARB": 0.70, "ZEC": 0.40,
+}
 
 
 # ── Indicator helpers ─────────────────────────────────────────────────────────
@@ -209,7 +215,7 @@ def score_bounce_short(j15m, j1h, rsi15m, ask_pct, adx,
                        stoch_k: float = 50.0, stoch_d: float = 50.0,
                        stoch_k_prev: float = 50.0, stoch_d_prev: float = 50.0) -> tuple[int, str, int]:
     tier, lev = _leverage_tier(adx)
-    stoch_gate = stoch_k > 75 and stoch_k < stoch_d
+    stoch_gate = stoch_k > 75 and stoch_k < stoch_d and stoch_k_prev >= stoch_d_prev
     if not (j15m > J15M_SHORT_GATE and j1h > J1H_SHORT_MIN
             and stoch_gate and ask_pct >= DEPTH_GATE_PCT):
         return 0, tier, lev
@@ -227,7 +233,7 @@ def score_bounce_long(j15m, j1h, rsi15m, bid_pct, adx,
                       stoch_k: float = 50.0, stoch_d: float = 50.0,
                       stoch_k_prev: float = 50.0, stoch_d_prev: float = 50.0) -> tuple[int, str, int]:
     tier, lev = _leverage_tier(adx)
-    stoch_gate = stoch_k < 25 and stoch_k > stoch_d
+    stoch_gate = stoch_k < 25 and stoch_k > stoch_d and stoch_k_prev <= stoch_d_prev
     if not (j15m < J15M_LONG_GATE and j1h < J1H_LONG_MAX
             and stoch_gate and bid_pct >= DEPTH_GATE_PCT):
         return 0, tier, lev
@@ -390,6 +396,10 @@ async def run_full_scan(client, market_health: Optional[dict] = None) -> list[di
             trend      = _trend_from_ma(price, candles_5m, candles_15m, candles_1h, adx1h)
             bid_pct, ask_pct = _depth_pcts(book)
 
+            if symbol == "BTC_USDT":
+                global _btc_j1h
+                _btc_j1h = j1h
+
             vol_15m    = candles_15m[-1]["volume"] if candles_15m else 0
             vol_ma15m  = (sum(c["volume"] for c in candles_15m[-10:]) / min(10, len(candles_15m))
                           if candles_15m else 0)
@@ -402,6 +412,13 @@ async def run_full_scan(client, market_health: Optional[dict] = None) -> list[di
             sl_dist      = max(_sl_atr, _min_sl_dist)
 
             # ── Score both directions ─────────────────────────────────────────
+            _sym_base = symbol.replace("_USDT", "")
+            _pair_corr = BTC_CORRELATION.get(_sym_base, 0.75)
+            _regime_block_short = _regime_block_long = False
+            if _pair_corr >= 0.65:
+                if   _btc_j1h < 20:            _regime_block_short = True
+                elif 40 <= _btc_j1h <= 60:     _regime_block_short = _regime_block_long = True
+                elif _btc_j1h > 80:            _regime_block_long  = True
             for direction in ("SHORT", "LONG"):
                 key = f"{symbol}{direction}"
 
@@ -414,6 +431,11 @@ async def run_full_scan(client, market_health: Optional[dict] = None) -> list[di
                     g_stoch = stoch_k > 75 and stoch_k < stoch_d
 
                     g_depth = ask_pct >= DEPTH_GATE_PCT
+                    if _regime_block_short:
+                        log.info(f"[REGIME] {symbol} SHORT blocked — BTC J1H={_btc_j1h:.1f} corr={_pair_corr}")
+                        _last_scores[key] = 0
+                        _pending.pop(key, None)
+                        continue
                     score, tier, lev = score_bounce_short(
                         j15m, j1h, rsi15m, ask_pct, adx1h, j5m=j5m, trend=trend,
                         stoch_k=stoch_k, stoch_d=stoch_d,
@@ -428,6 +450,11 @@ async def run_full_scan(client, market_health: Optional[dict] = None) -> list[di
                     g_stoch = stoch_k < 25 and stoch_k > stoch_d
 
                     g_depth = bid_pct >= DEPTH_GATE_PCT
+                    if _regime_block_long:
+                        log.info(f"[REGIME] {symbol} LONG blocked — BTC J1H={_btc_j1h:.1f} corr={_pair_corr}")
+                        _last_scores[key] = 0
+                        _pending.pop(key, None)
+                        continue
                     score, tier, lev = score_bounce_long(
                         j15m, j1h, rsi15m, bid_pct, adx1h, j5m=j5m, trend=trend,
                         stoch_k=stoch_k, stoch_d=stoch_d,

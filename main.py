@@ -1318,6 +1318,7 @@ async def _state_heartbeat_loop():
 
 async def _mexc_balance_loop():
     while True:
+        print(f"[MEXC BALANCE] attempting fetch — key={'set' if _mexc_api.MEXC_API_KEY else 'MISSING'}")
         try:
             acc = await asyncio.to_thread(_mexc_api.get_account)
             pos = await asyncio.to_thread(_mexc_api.get_position_count)
@@ -1332,7 +1333,9 @@ async def _mexc_balance_loop():
                 })
                 print(f"[MEXC BALANCE] equity=${_mexc_account['equity']:.2f} available=${_mexc_account['available']:.2f} positions={pos}")
         except Exception as e:
+            import traceback
             print(f"[MEXC BALANCE] error: {e}")
+            print(f"[MEXC BALANCE] traceback: {traceback.format_exc()}")
         await asyncio.sleep(60)
 
 

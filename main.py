@@ -1396,6 +1396,7 @@ async def index(request: Request):
         "paper_mode":    PAPER_MODE,
         "scan_interval": SCAN_INTERVAL_SECONDS,
         "margin_cap":    MARGIN_HARD_CAP,
+        "cache_bust":    int(time.time()),
     }, headers={"Content-Type": "text/html; charset=utf-8"})
 
 

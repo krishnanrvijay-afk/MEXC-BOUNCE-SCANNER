@@ -9,7 +9,13 @@ let bannerTF     = 'BOTH';
 
 const ADX_FADE_MAX = 60;
 
-// ── Fetch + countdown state ───────────────────────────────────────────────────
+  const BTC_CORRELATION = {
+    ETH_USDT:0.94, SOL_USDT:0.86, XRP_USDT:0.84, DOGE_USDT:0.87,
+    LINK_USDT:0.82, AVAX_USDT:0.80, SUI_USDT:0.82, NEAR_USDT:0.78,
+    WIF_USDT:0.65, ARB_USDT:0.70, ZEC_USDT:0.40,
+  };
+
+  // ── Fetch + countdown state ───────────────────────────────────────────────────
 let _scanCdSec   = 0;   // counts down to next scan
 let _priceCdSec  = 0;   // counts down to next price update
 
@@ -1554,6 +1560,21 @@ function openPairOverlay(sym) {
   pn.dataset.state = '';
   pn.innerHTML = `<div class="pov-loading">Loading ${sym}…</div>`;
   bd.appendChild(pn);
+  const _btcForRegime = (STATE?.pair_states||[]).find(p => p.symbol==='BTC_USDT');
+  const _symBase = sym.replace('_USDT','');
+  const _corrVal = BTC_CORRELATION[sym] ?? BTC_CORRELATION[_symBase] ?? 0.75;
+  const _regimeResult = sym === 'BTC_USDT' ? null : _btcRegime(_btcForRegime);
+  const _showRegime = sym !== 'BTC_USDT';
+  if (_showRegime) {
+    const rn = document.createElement('div');
+    rn.id = 'btc-regime-pn';
+    rn.style.cssText = "flex:1;max-width:360px;align-self:center;border-radius:8px;overflow:hidden;display:flex;flex-direction:column;font-family:'JetBrains Mono',monospace";
+    const _regimeCorr = _corrVal;
+    const _exemptState = _regimeCorr < 0.65;
+    rn.className = _exemptState ? 'exempt' : (_regimeResult?.cls || 'exempt');
+    rn.innerHTML = _btcRegimeCardHtml(sym, _btcForRegime, _exemptState ? {state:'EXEMPT',cls:'exempt',color:'#fff',label:'⚪ EXEMPT'} : _regimeResult, _regimeCorr);
+    bd.appendChild(rn);
+  }
   document.body.appendChild(bd);
   _ovPrevGates = null;
   _ovFetch(sym, true);
@@ -1929,6 +1950,19 @@ function _ovUpdate(pn, d) {
   // State transition — full re-render
   if (prevState !== state) { _ovRender(pn, d); return; }
 
+  // Regime-change detection — full re-render if BTC J1H zone changed
+  const _hb = document.getElementById('pov-hdr-btns');
+  if (_hb) {
+    const _sym3 = document.getElementById('pair-ov-pn')?.dataset?.sym || '';
+    const _btcNow3 = (STATE?.pair_states||[]).find(p=>p.symbol==='BTC_USDT');
+    const _rgNow3  = _sym3==='BTC_USDT'||!_btcNow3 ? null : _btcRegime(_btcNow3);
+    if (_hb.dataset.lastRegime !== (_rgNow3?.state||'')) {
+      _hb.dataset.lastRegime = _rgNow3?.state || '';
+      _ovRender(pn, d);
+      return;
+    }
+  }
+
   pn.dataset.state = state;
 
   // Price
@@ -2212,7 +2246,145 @@ function fmtCd(seconds) {
   return `${Math.floor(seconds/60)}m`;
 }
 
-// ── MEXC Account Pill ────────────────────────────────────────────────────────────────────────────
+// ── BTC Regime helpers ───────────────────────────────────────────────────────────────────────────
+  function _btcRegime(btc) {
+    if (!btc) return { state:'EXEMPT', cls:'exempt', color:'#fff', label:'⚪ EXEMPT' };
+    const j1h = btc.j1h || 0;
+    if (j1h < 20)  return { state:'CONFIRMED_LONG',  cls:'confirmed', color:'#00e676', label:'✅ CONFIRMED' };
+    if (j1h < 40)  return { state:'CAUTION_LONG',    cls:'caution',   color:'#ffb300', label:'⚠️ CAUTION'  };
+    if (j1h <= 60) return { state:'STOP',            cls:'stop',      color:'#ff4646', label:'�ude ab STOP'     };
+    if (j1h < 80)  return { state:'CAUTION_SHORT',   cls:'caution',   color:'#ffb300', label:'⚠ CAUTION'  };
+    return           { state:'CONFIRMED_SHORT',  cls:'confirmed', color:'#ff4646', label:'✅ SHORT SAFE' };
+  }
+
+  function _btcRegimeCardHtml(sym, btc, regime, corr) {
+      const j15m = Math.min(100, Math.max(0, btc?.j15m    || 0));
+      const j1h  = Math.min(100, Math.max(0, btc?.j1h     || 0));
+      const sK   = Math.min(100, Math.max(0, btc?.stoch_k || 0));
+      const sD   = Math.min(100, Math.max(0, btc?.stoch_d || 0));
+      const adx  = +(btc?.adx1h || btc?.adx || 0).toFixed(1);
+      const price = fmtPrice(btc?.price || 0);
+      const isExempt = corr < 0.65;
+      const cls   = isExempt ? 'exempt' : regime.cls;
+      const color = isExempt ? '#fff'   : regime.color;
+      const state = isExempt ? 'EXEMPT' : regime.state;
+      const symBase = sym.replace('_USDT','');
+
+      const heroBg  = cls==='confirmed' ? '#0a1a0a' : cls==='caution' ? '#1a1200' : cls==='stop' ? '#1a0808' : '#0d0d0d';
+      const heroBor = cls==='confirmed' ? '1px solid #00e67644' : cls==='caution' ? '1px solid #ffb30044' : cls==='stop' ? '1px solid #ff525244' : '1px solid #2a2a2a';
+      const hdrBor  = cls==='confirmed' ? 'rgba(0,230,118,0.15)' : cls==='caution' ? 'rgba(255,179,0,0.15)' : cls==='stop' ? 'rgba(255,70,70,0.15)' : 'rgba(255,255,255,0.1)';
+      const j1hGlow = cls==='confirmed' ? '0 0 16px rgba(0,230,118,0.5)' : cls==='caution' ? '0 0 16px rgba(255,179,0,0.5)' : cls==='stop' ? '0 0 16px rgba(255,70,70,0.5)' : 'none';
+
+      const kAboveD = sK > sD;
+      const stateLabel = state==='CONFIRMED_LONG'  ? '✅ LONG SAFE ZONE'
+                       : state==='CAUTION_LONG'    ? '⚠️ CAUTION ZONE'
+                       : state==='STOP'            ? '�ude ab STOP ZONE'
+                       : state==='CAUTION_SHORT'   ? '⚠ CAUTION ZONE'
+                       : state==='CONFIRMED_SHORT' ? '✅ SHORT SAFE ZONE'
+                       :                            '⚪ NOT APPLIED';
+      const threshNote = state==='CONFIRMED_LONG'  ? 'below 20 threshold'
+                       : state==='CAUTION_LONG'    ? 'below 40 threshold'
+                       : state==='STOP'            ? 'in 40–60 stop band'
+                       : state==='CAUTION_SHORT'   ? 'above 60 threshold'
+                       : state==='CONFIRMED_SHORT' ? 'above 80 threshold'
+                       :                            'exempt';
+      const stochLine = 'K=' + sK.toFixed(0) + (kAboveD ? ' above' : ' below') + ' D=' + sD.toFixed(0) + (kAboveD ? ' ↑' : ' ↓');
+
+      let narrative = '';
+      if      (state==='CONFIRMED_LONG')  narrative = 'BTC is deeply oversold on the hourly and momentum has turned up — the market is in bounce territory and longs have a green light from the regime.';
+      else if (state==='CAUTION_LONG')    narrative = 'BTC hourly is between oversold and neutral — bounce possible but not confirmed yet. ' + symBase + ' pair gates are ready. Wait for J1H below 20 for full conviction, or enter knowing the risk.';
+      else if (state==='STOP')            narrative = "BTC is in no-man’s land — not oversold enough to bounce, momentum falling. Every long entered in this regime hit its stop loss. Wait for J1H to drop below 20.";
+      else if (state==='CAUTION_SHORT')   narrative = 'BTC hourly is approaching overbought but not confirmed yet. Wait for J1H above 80 for full short conviction.';
+      else if (state==='CONFIRMED_SHORT') narrative = 'BTC is deeply overbought on the hourly — the market is extended and shorts have a green light from the regime.';
+      else                                narrative = 'BTC regime does not apply to ' + symBase + '. Correlation ' + corr.toFixed(2) + ' is below the 0.65 threshold — this pair moves on independent catalysts and is not gated by BTC.';
+
+      const gateDesc  = corr>=0.75 ? 'regime gate' : corr>=0.65 ? 'advisory only' : 'no gate';
+      const j15mCol   = j15m>80 ? '#ff4646' : j15m<20 ? '#00e676' : '#fff';
+      const j15mSub   = j15m>80 ? 'overbought ST' : j15m<20 ? 'oversold ST ✅' : 'neutral';
+      const adxCol2   = adx>=25 ? '#ffb300' : '#fff';
+      const adxSub    = adx>=40 ? 'strong' : adx>=25 ? 'moderate' : 'weak';
+      const stochVal  = sK>sD && sK<25 ? '#00e676' : sK<sD && sK>75 ? '#ff4646' : sK>sD ? '#ffb300' : '#fff';
+      let stochPillCol = '#888', stochPillBg = '#1a1a1a', stochPillTxt = 'K▼D not confirmed';
+      if      (sK>sD && sK<25)  { stochPillCol='#00e676'; stochPillBg='#00e67622'; stochPillTxt='K▶D ✅ BULL'; }
+      else if (sK<sD && sK>75)  { stochPillCol='#ff4646'; stochPillBg='#ff464622'; stochPillTxt='K▼D ❌ BEAR'; }
+      else if (sK>sD)           { stochPillCol='#ffb300'; stochPillBg='#ffb30022'; stochPillTxt='K▶D not in zone'; }
+
+      const curPct = Math.min(99, Math.max(1, j1h)).toFixed(1);
+      const curBg  = cls==='confirmed' ? '#00e676' : cls==='caution' ? '#ffb300' : cls==='stop' ? '#ff4646' : '#555';
+      const curGlow = cls==='confirmed' ? '0 0 10px #00e676,0 0 20px rgba(0,230,118,0.5)'
+                    : cls==='caution'   ? '0 0 10px #ffb300,0 0 20px rgba(255,179,0,0.5)'
+                    : cls==='stop'      ? '0 0 10px #ff4646,0 0 20px rgba(255,70,70,0.5)'
+                    :                     'none';
+
+      const footerCol = cls==='confirmed' ? '#00e676' : cls==='caution' ? '#ffb300' : cls==='stop' ? '#ff4646' : '#aaa';
+      const footerTxt = cls==='confirmed' ? 'corr ' + corr.toFixed(2) + ' · gate active · ~78% WR in this zone'
+                      : cls==='caution'   ? 'corr ' + corr.toFixed(2) + ' · your discretion · ~42% WR in caution zone'
+                      : cls==='stop'      ? 'corr ' + corr.toFixed(2) + ' · regime gate · 89% SL rate · wait for J1H <20'
+                      :                     'corr ' + corr.toFixed(2) + ' · independent catalysts · no gate';
+
+      const p = [];
+      p.push('<div style="padding:8px 12px 6px;border-bottom:1px solid ' + hdrBor + ';display:flex;justify-content:space-between;align-items:center">');
+      p.push('<div>');
+      p.push('<div style="font-family:\'Bebas Neue\',sans-serif;font-size:16px;color:' + color + ';letter-spacing:0.04em;line-height:1">BTC REGIME</div>');
+      p.push('<div style="font-family:\'JetBrains Mono\',monospace;font-size:7px;color:#fff;font-weight:700;margin-top:2px">' + price + ' · ADX ' + adx + ' · ' + symBase + ' corr ' + corr.toFixed(2) + ' · ' + gateDesc + '</div>');
+      p.push('</div>');
+      p.push('<span style="font-size:7px;font-weight:700;padding:2px 6px;border-radius:3px;border:1px solid ' + color + '66;color:' + color + ';font-family:\'JetBrains Mono\',monospace;background:' + color + '11">' + (isExempt ? '⚪ EXEMPT' : regime.label) + '</span>');
+      p.push('</div>');
+      p.push('<div style="border-radius:5px;padding:10px;margin:6px 8px 0;background:' + heroBg + ';border:' + heroBor + '">');
+      p.push('<div style="font-size:7px;font-weight:700;color:#fff;letter-spacing:0.1em;margin-bottom:3px">BTC J 1H — KEY GATE</div>');
+      p.push('<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">');
+      p.push('<div style="font-family:\'Bebas Neue\',sans-serif;font-size:44px;line-height:1;color:' + color + ';text-shadow:' + j1hGlow + '">' + j1h.toFixed(0) + '</div>');
+      p.push('<div style="display:flex;flex-direction:column;gap:2px">');
+      p.push('<div style="font-size:10px;font-weight:700;color:' + color + '">' + stateLabel + '</div>');
+      p.push('<div style="font-size:7px;font-weight:700;color:#fff">' + threshNote + '</div>');
+      p.push('<div style="font-size:7px;font-weight:700;color:#fff">' + stochLine + '</div>');
+      p.push('</div></div>');
+      p.push('<div style="border-top:1px solid ' + hdrBor + ';padding-top:5px;font-size:9px;font-weight:700;color:#fff;line-height:1.6">' + narrative + '</div>');
+      p.push('</div>');
+      p.push('<div style="margin:6px 8px 0;flex-shrink:0">');
+      p.push('<div style="display:flex;justify-content:space-between;font-family:\'JetBrains Mono\',monospace;font-size:7px;font-weight:700;margin-bottom:2px"><span style="color:#fff">J1H ON SCALE</span><span style="color:' + color + '">' + j1h.toFixed(0) + ' of 100</span></div>');
+      p.push('<div style="position:relative;height:12px;border-radius:3px;overflow:visible;display:flex">');
+      p.push('<div style="flex:2;background:rgba(0,230,118,0.30);border-radius:3px 0 0 3px"></div>');
+      p.push('<div style="flex:2;background:rgba(255,179,0,0.25);border-left:1px solid #ffb30044;border-right:1px solid #ffb30044"></div>');
+      p.push('<div style="flex:2;background:rgba(255,70,70,0.35);border-left:1px solid #ff464444;border-right:1px solid #ff464444"></div>');
+      p.push('<div style="flex:2;background:rgba(255,179,0,0.25);border-right:1px solid #ffb30044"></div>');
+      p.push('<div style="flex:2;background:rgba(255,70,70,0.30);border-radius:0 3px 3px 0"></div>');
+      p.push('<div style="position:absolute;top:-2px;bottom:-2px;width:3px;border-radius:2px;left:' + curPct + '%;transform:translateX(-50%);background:' + curBg + ';box-shadow:' + curGlow + '"></div>');
+      p.push('</div>');
+      p.push('<div style="display:flex;justify-content:space-between;font-family:\'JetBrains Mono\',monospace;font-size:6px;font-weight:700;margin-top:2px"><span style="color:#00e676">&lt;20 LONG</span><span style="color:#ffb300">20–40</span><span style="color:#ff4646">40–60 STOP</span><span style="color:#ffb300">60–80</span><span style="color:#ff4646">&gt;80 SHORT</span></div>');
+      p.push('</div>');
+      p.push('<div style="display:flex;gap:4px;margin:6px 8px 0;flex-shrink:0">');
+      p.push('<div style="flex:1;background:' + heroBg + ';border:' + heroBor + ';border-radius:4px;padding:5px 6px">');
+      p.push('<div style="font-family:\'JetBrains Mono\',monospace;font-size:6px;font-weight:700;color:#fff;margin-bottom:2px">BTC J 15M</div>');
+      p.push('<div style="font-family:\'JetBrains Mono\',monospace;font-size:13px;font-weight:700;line-height:1;color:' + j15mCol + '">' + j15m.toFixed(0) + '</div>');
+      p.push('<div style="font-family:\'JetBrains Mono\',monospace;font-size:6px;font-weight:700;color:#fff;margin-top:2px">' + j15mSub + '</div>');
+      p.push('</div>');
+      p.push('<div style="flex:1;background:' + heroBg + ';border:' + heroBor + ';border-radius:4px;padding:5px 6px">');
+      p.push('<div style="font-family:\'JetBrains Mono\',monospace;font-size:6px;font-weight:700;color:#fff;margin-bottom:2px">BTC STOCH K/D</div>');
+      p.push('<div style="font-family:\'JetBrains Mono\',monospace;font-size:13px;font-weight:700;line-height:1;color:' + stochVal + '">' + sK.toFixed(0) + '/' + sD.toFixed(0) + '</div>');
+      p.push('<div style="font-family:\'JetBrains Mono\',monospace;font-size:6px;font-weight:700;padding:1px 3px;border-radius:2px;display:inline-block;color:' + stochPillCol + ';background:' + stochPillBg + ';border:1px solid ' + stochPillCol + '44;margin-top:2px">' + stochPillTxt + '</div>');
+      p.push('</div>');
+      p.push('<div style="flex:1;background:' + heroBg + ';border:' + heroBor + ';border-radius:4px;padding:5px 6px">');
+      p.push('<div style="font-family:\'JetBrains Mono\',monospace;font-size:6px;font-weight:700;color:#fff;margin-bottom:2px">BTC ADX</div>');
+      p.push('<div style="font-family:\'JetBrains Mono\',monospace;font-size:13px;font-weight:700;line-height:1;color:' + adxCol2 + '">' + adx.toFixed(0) + '</div>');
+      p.push('<div style="font-family:\'JetBrains Mono\',monospace;font-size:6px;font-weight:700;color:#fff;margin-top:2px">' + adxSub + '</div>');
+      p.push('</div>');
+      p.push('</div>');
+      const kdLiveCol = kAboveD ? '#00e676' : '#ff4646';
+      p.push('<div style="display:flex;align-items:center;gap:6px;margin:5px 8px 0;padding:4px 8px;background:' + heroBg + ';border:' + heroBor + ';border-radius:4px;flex-shrink:0">');
+      p.push('<span style="background:#1a1200;border:1px solid #ffb30066;color:#ffb300;font-size:6px;font-weight:700;padding:1px 5px;border-radius:2px;flex-shrink:0;font-family:\'JetBrains Mono\',monospace">LIVE BTC</span>');
+      p.push('<span style="font-family:\'JetBrains Mono\',monospace;font-size:6px;color:rgba(255,255,255,0.6)">PRICE</span><span style="font-family:\'JetBrains Mono\',monospace;font-size:8px;font-weight:700;color:#fff">' + price + '</span>');
+      p.push('<span style="font-family:\'JetBrains Mono\',monospace;font-size:6px;color:rgba(255,255,255,0.6)">J15M</span><span style="font-family:\'JetBrains Mono\',monospace;font-size:8px;font-weight:700;color:' + j15mCol + '">' + j15m.toFixed(0) + '</span>');
+      p.push('<span style="font-family:\'JetBrains Mono\',monospace;font-size:6px;color:rgba(255,255,255,0.6)">J1H</span><span style="font-family:\'JetBrains Mono\',monospace;font-size:8px;font-weight:700;color:' + color + '">' + j1h.toFixed(0) + '</span>');
+      p.push('<span style="font-family:\'JetBrains Mono\',monospace;font-size:6px;color:rgba(255,255,255,0.6)">K/D</span><span style="font-family:\'JetBrains Mono\',monospace;font-size:8px;font-weight:700;color:' + kdLiveCol + '">' + sK.toFixed(0) + '/' + sD.toFixed(0) + '</span>');
+      p.push('</div>');
+      p.push('<div style="padding:5px 10px;border-top:1px solid ' + hdrBor + ';font-family:\'JetBrains Mono\',monospace;font-size:7px;font-weight:700;color:' + footerCol + ';text-align:right;margin-top:5px">');
+      p.push(footerTxt);
+      p.push('</div>');
+      return p.join('');
+  }
+
+  // ── MEXC Account Pill ────────────────────────────────────────────────────────────────────────────
 let _mexcAccMasked = false;
 let _mexcAccData   = null;
 

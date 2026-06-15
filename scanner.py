@@ -19,11 +19,12 @@ def _base(sym):
     """Strip _USDT suffix for per-pair config lookups."""
     return sym.removesuffix("_USDT")
 
-# ── Module-level state ────────────────────────────────────────────────────────
+# -- Module-level state --------------------------------------------------------
 
 _last_scores: dict[str, int]   = {}   # keyed "BTCSHORT" / "BTCLONG"
-_last_stoch:  dict[str, tuple] = {}   # keyed symbol → (stoch_k, stoch_d) from previous scan
-_cooldowns:   dict[str, float] = {}   # keyed "BTCSHORT" / "BTCLONG" → expiry ts
+_last_stoch:  dict[str, tuple] = {}   # keyed symbol -> (stoch_k, stoch_d) from previous scan
+_last_stoch_fast: dict[str, tuple] = {}   # keyed symbol -> (stoch_k_fast, stoch_d_fast) 8,3,3
+_cooldowns:   dict[str, float] = {}   # keyed "BTCSHORT" / "BTCLONG" -> expiry ts
 _scan_count:  int              = 0
 _pending:     dict[str, dict]  = {}   # first-scan confirmed, awaiting 2nd
 _stale_prices: set[str]        = set()  # symbols with 5+ consecutive missing prices
@@ -36,7 +37,7 @@ BTC_CORRELATION: dict = {
 }
 
 
-# ── Indicator helpers ─────────────────────────────────────────────────────────
+# -- Indicator helpers ---------------------------------------------------------
 
 def _compute_kdj(candles: list[dict], period: int = 9) -> tuple[float, float, float]:
     if len(candles) < period:
@@ -200,7 +201,7 @@ def _depth_pcts(book: dict) -> tuple[float, float]:
     return round(bid_vol / total * 100, 1), round(ask_vol / total * 100, 1)
 
 
-# ── Scoring ───────────────────────────────────────────────────────────────────
+# -- Scoring -------------------------------------------------------------------
 
 def _leverage_tier(adx: float) -> tuple[str, int]:
     if adx >= 50:
@@ -246,7 +247,7 @@ def score_bounce_long(j15m, j1h, rsi15m, bid_pct, adx,
     return score, tier, lev
 
 
-# ── Cooldown helpers ──────────────────────────────────────────────────────────
+# -- Cooldown helpers ----------------------------------------------------------
 
 def set_close_cooldown(symbol: str, direction: str):
     _cooldowns[f"{symbol}{direction}"] = time.time() + COOLDOWN_SECONDS
@@ -273,6 +274,7 @@ def clear_all_scanner_state():
     global _scan_count
     _last_scores.clear()
     _last_stoch.clear()
+    _last_stoch_fast.clear()
     _cooldowns.clear()
     _pending.clear()
     _scan_count = 0
@@ -346,7 +348,7 @@ def compute_market_health(pair_states: list[dict], recent_trades: list[dict]) ->
     }
 
 
-# ── Main scan ─────────────────────────────────────────────────────────────────
+# -- Main scan -----------------------------------------------------------------
 
 async def run_full_scan(client, market_health: Optional[dict] = None) -> list[dict]:
     global _scan_count
@@ -356,20 +358,20 @@ async def run_full_scan(client, market_health: Optional[dict] = None) -> list[di
 
     for symbol in PAIRS:
         try:
-            await asyncio.sleep(0.5)  # rate-limit spacing — 12 pairs × 0.5s = 6s minimum spread
+            await asyncio.sleep(0.5)  # rate-limit spacing - 12 pairs x 0.5s = 6s minimum spread
             candles_5m, candles_15m, candles_1h, book, price = await _fetch_pair_data(client, symbol)
 
             if not price or price == 0:
-                log.warning(f"[SCAN] {symbol} — no price, retrying in 2s...")
+                log.warning(f"[SCAN] {symbol} - no price, retrying in 2s...")
                 await asyncio.sleep(2)
                 price = await client.get_price(symbol)
                 if not price or price == 0:
                     _stale_counts[symbol] = _stale_counts.get(symbol, 0) + 1
                     if _stale_counts[symbol] >= 5:
-                        log.warning(f"[PRICE STALE] {symbol} — {_stale_counts[symbol]} consecutive scans with no price")
+                        log.warning(f"[PRICE STALE] {symbol} - {_stale_counts[symbol]} consecutive scans with no price")
                         _stale_prices.add(symbol)
                     else:
-                        log.warning(f"[PRICE STALE] {symbol} — {_stale_counts[symbol]}/5 consecutive no-price scans")
+                        log.warning(f"[PRICE STALE] {symbol} - {_stale_counts[symbol]}/5 consecutive no-price scans")
                     continue
                 _stale_counts[symbol] = 0
                 _stale_prices.discard(symbol)
@@ -377,7 +379,7 @@ async def run_full_scan(client, market_health: Optional[dict] = None) -> list[di
                 _stale_counts[symbol] = 0
                 _stale_prices.discard(symbol)
 
-            # ── Indicators ────────────────────────────────────────────────────
+            # -- Indicators ----------------------------------------------------
             _, _, j5m  = _compute_kdj(candles_5m)
             _, _, j15m = _compute_kdj(candles_15m)
             _, _, j1h  = _compute_kdj(candles_1h)
@@ -386,6 +388,10 @@ async def run_full_scan(client, market_health: Optional[dict] = None) -> list[di
             stoch_k, stoch_d           = _compute_stochastic(candles_15m)
             stoch_k_prev, stoch_d_prev = _last_stoch.get(symbol, (50.0, 50.0))
             _last_stoch[symbol]        = (stoch_k, stoch_d)
+            stoch_k_fast, stoch_d_fast           = _compute_stochastic(candles_15m, k_period=8)
+            stoch_k_prev_fast, stoch_d_prev_fast = _last_stoch_fast.get(symbol, (50.0, 50.0))
+            _last_stoch_fast[symbol]             = (stoch_k_fast, stoch_d_fast)
+            print(f"[STOCH FAST] {symbol} K={stoch_k_fast:.1f} D={stoch_d_fast:.1f} prev_K={stoch_k_prev_fast:.1f}")
             atr5m      = _compute_atr(candles_5m)
             atr15m     = _compute_atr(candles_15m)
             atr1h      = _compute_atr(candles_1h)
@@ -404,14 +410,14 @@ async def run_full_scan(client, market_health: Optional[dict] = None) -> list[di
             vol_ma15m  = (sum(c["volume"] for c in candles_15m[-10:]) / min(10, len(candles_15m))
                           if candles_15m else 0)
 
-            # ── SL distance (ATR base, floored by MIN_SL_PCT + session buffer) ───────────────────────────────────────────────────
+            # -- SL distance (ATR base, floored by MIN_SL_PCT + session buffer) ---------------------------------------------------
             _sl_atr      = atr15m * ATR_SL_MULTIPLIER
             _min_sl_pct  = MIN_SL_PCT.get(_base(symbol), MIN_SL_PCT_DEFAULT)
             _sess_buf    = get_session_sl_buffer()
             _min_sl_dist = price * (_min_sl_pct + _sess_buf)
             sl_dist      = max(_sl_atr, _min_sl_dist)
 
-            # ── Score both directions ─────────────────────────────────────────
+            # -- Score both directions -----------------------------------------
             _sym_base = symbol.replace("_USDT", "")
             _pair_corr = BTC_CORRELATION.get(_sym_base, 0.75)
             _regime_block_short = _regime_block_long = False
@@ -432,7 +438,7 @@ async def run_full_scan(client, market_health: Optional[dict] = None) -> list[di
 
                     g_depth = ask_pct >= DEPTH_GATE_PCT
                     if _regime_block_short:
-                        log.info(f"[REGIME] {symbol} SHORT blocked — BTC J1H={_btc_j1h:.1f} corr={_pair_corr}")
+                        log.info(f"[REGIME] {symbol} SHORT blocked - BTC J1H={_btc_j1h:.1f} corr={_pair_corr}")
                         _last_scores[key] = 0
                         _pending.pop(key, None)
                         continue
@@ -451,7 +457,7 @@ async def run_full_scan(client, market_health: Optional[dict] = None) -> list[di
 
                     g_depth = bid_pct >= DEPTH_GATE_PCT
                     if _regime_block_long:
-                        log.info(f"[REGIME] {symbol} LONG blocked — BTC J1H={_btc_j1h:.1f} corr={_pair_corr}")
+                        log.info(f"[REGIME] {symbol} LONG blocked - BTC J1H={_btc_j1h:.1f} corr={_pair_corr}")
                         _last_scores[key] = 0
                         _pending.pop(key, None)
                         continue
@@ -464,7 +470,7 @@ async def run_full_scan(client, market_health: Optional[dict] = None) -> list[di
                                  f"stoch_k={stoch_k:.1f}/stoch_d={stoch_d:.1f}(need<25,k>d) "
                                  f"bid={bid_pct:.1f}%(need>={DEPTH_GATE_PCT}%)")
 
-                # ── GATE3 log — every scan when >= 3 of 4 gates pass ────────────
+                # -- GATE3 log - every scan when >= 3 of 4 gates pass ------------
                 _gate_list  = [g_j15m, g_j1h, g_stoch, g_depth]
                 _gate_count = sum(_gate_list)
                 _blocked    = [n for n, v in zip(["J15M", "J1H", "STOCH", "DEPTH"], _gate_list) if not v]
@@ -492,14 +498,14 @@ async def run_full_scan(client, market_health: Optional[dict] = None) -> list[di
                         "symbol": symbol, "direction": direction,
                         "score": score, "tier": tier,
                     }
-                    log.info(f"[SCORE] {symbol} {direction} first-scan confirmed — awaiting 2nd")
+                    log.info(f"[SCORE] {symbol} {direction} first-scan confirmed - awaiting 2nd")
                     continue
 
-                # Second consecutive scan — check ADX fade-max before emitting alert
+                # Second consecutive scan - check ADX fade-max before emitting alert
                 _last_scores[key] = score
 
                 if adx1h > ADX_FADE_MAX:
-                    log.info(f"[SKIP] {symbol} {direction} adx={adx1h:.1f} exceeds fade max {ADX_FADE_MAX} — trend too strong to fade")
+                    log.info(f"[SKIP] {symbol} {direction} adx={adx1h:.1f} exceeds fade max {ADX_FADE_MAX} - trend too strong to fade")
                     continue
 
                 # Compute SL / TP prices (HC score-10: 2.5R TP1, 3.5R TP2)
@@ -572,7 +578,7 @@ async def run_full_scan(client, market_health: Optional[dict] = None) -> list[di
         except Exception as e:
             log.error(f"[SCAN] {symbol} error: {e}", exc_info=True)
 
-    log.info(f"[SCAN] #{_scan_count} complete — {len(new_alerts)} new alerts")
+    log.info(f"[SCAN] #{_scan_count} complete - {len(new_alerts)} new alerts")
     return new_alerts
 
 
@@ -595,6 +601,10 @@ async def scan_pair_state(client) -> list[dict]:
             stoch_k, stoch_d           = _compute_stochastic(candles_15m)
             stoch_k_prev, stoch_d_prev = _last_stoch.get(symbol, (50.0, 50.0))
             _last_stoch[symbol]        = (stoch_k, stoch_d)
+            stoch_k_fast, stoch_d_fast           = _compute_stochastic(candles_15m, k_period=8)
+            stoch_k_prev_fast, stoch_d_prev_fast = _last_stoch_fast.get(symbol, (50.0, 50.0))
+            _last_stoch_fast[symbol]             = (stoch_k_fast, stoch_d_fast)
+            print(f"[STOCH FAST] {symbol} K={stoch_k_fast:.1f} D={stoch_d_fast:.1f} prev_K={stoch_k_prev_fast:.1f}")
             atr15m     = _compute_atr(candles_15m)
             adx1h      = _compute_adx(candles_1h)
             ma10       = _compute_ma(candles_1h, 10)
@@ -623,6 +633,10 @@ async def scan_pair_state(client) -> list[dict]:
                 "stoch_d":     round(stoch_d, 2),
                 "stoch_k_prev": round(stoch_k_prev, 2),
                 "stoch_d_prev": round(stoch_d_prev, 2),
+                "stoch_k_fast":      round(stoch_k_fast, 2),
+                "stoch_d_fast":      round(stoch_d_fast, 2),
+                "stoch_k_prev_fast": round(stoch_k_prev_fast, 2),
+                "stoch_d_prev_fast": round(stoch_d_prev_fast, 2),
                 "rsi1h":       round(rsi1h, 2),
                 "atr15m":      round(atr15m, 6),
                 "adx1h":       round(adx1h, 2),

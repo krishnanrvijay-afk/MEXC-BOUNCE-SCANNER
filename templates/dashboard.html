@@ -486,6 +486,7 @@
     /* ── MH NARRATIVE OVERLAY ── */
     #mh-ov-bd { position:fixed;inset:0;background:rgba(0,0,0,0.75);backdrop-filter:blur(4px);z-index:1000;display:none;align-items:center;justify-content:center; }
     #mh-ov-bd.open { display:flex; }
+  #mexc-acc-backdrop.open { display:flex !important; }
     #mh-ov-pn { width:min(420px,92vw);background:#080808;border-radius:10px;border:1px solid #222;box-shadow:0 24px 80px rgba(0,0,0,0.85);animation:pov-in 0.16s ease-out; }
     .mh-ov-hdr { display:flex;justify-content:space-between;align-items:center;padding:14px 16px 10px;border-bottom:1px solid #141414; }
     .mh-ov-title { font-family:'Bebas Neue',sans-serif;font-size:18px;letter-spacing:3px;color:#fff; }
@@ -566,6 +567,11 @@
     <div class="sep"></div>
     <div id="mode-badge" class="mode-badge" style="display:none;"></div>
     <div id="cb-badge" style="display:none; font-family:'JetBrains Mono',monospace; font-size:9px; font-weight:700; padding:3px 8px; border-radius:4px; background:rgba(255,68,68,0.1); color:#ff4444; border:1px solid rgba(255,68,68,0.3);">⚡ CB ACTIVE</div>
+    <div id="mexc-acc-pill" onclick="mexcAccOpenCard()" style="display:flex;align-items:center;gap:6px;background:#1a1200;border:1px solid #ff8c00;border-radius:20px;padding:4px 12px;cursor:pointer;margin-left:8px">
+      <span style="font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:700;color:#ff8c00;letter-spacing:0.06em">MEXC</span>
+      <span id="mexc-acc-pill-val" style="font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:700;color:#ff8c00">TAP FOR BALANCE</span>
+      <span id="mexc-acc-pill-eye" style="font-size:12px">👁</span>
+    </div>
   </div>
 </div>
 
@@ -692,5 +698,25 @@
       <div id="mh-ov-body" class="mh-ov-body"></div>
     </div>
   </div>
+<div id="mexc-acc-backdrop" onclick="mexcAccCloseCard()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);backdrop-filter:blur(2px);z-index:8000;align-items:center;justify-content:center">
+  <div id="mexc-acc-card" onclick="event.stopPropagation()" style="background:#0d0d0d;border:1px solid #ff8c00;border-radius:10px;padding:20px;width:320px;font-family:'JetBrains Mono',monospace">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+      <span style="font-family:'Bebas Neue',sans-serif;font-size:20px;color:#ff8c00;letter-spacing:0.06em">MEXC ACCOUNT</span>
+      <span id="mexc-acc-card-eye" onclick="mexcAccToggleMask(event)" style="cursor:pointer;font-size:16px">👁</span>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="display:flex;justify-content:space-between"><span style="font-size:9px;font-weight:700;color:#ff8c00">EQUITY</span><span id="mexc-acc-equity" style="font-size:13px;font-weight:700;color:#fff">—</span></div>
+      <div style="display:flex;justify-content:space-between"><span style="font-size:9px;font-weight:700;color:#ff8c00">AVAILABLE</span><span id="mexc-acc-avail" style="font-size:13px;font-weight:700;color:#00e676">—</span></div>
+      <div style="display:flex;justify-content:space-between"><span style="font-size:9px;font-weight:700;color:#ff8c00">MARGIN USED</span><span id="mexc-acc-margin" style="font-size:13px;font-weight:700;color:#b388ff">—</span></div>
+      <div style="display:flex;justify-content:space-between"><span style="font-size:9px;font-weight:700;color:#ff8c00">UNREALIZED</span><span id="mexc-acc-pnl" style="font-size:13px;font-weight:700;color:#fff">—</span></div>
+      <div style="display:flex;justify-content:space-between"><span style="font-size:9px;font-weight:700;color:#ff8c00">POSITIONS</span><span id="mexc-acc-pos" style="font-size:13px;font-weight:700;color:#fff">—</span></div>
+    </div>
+    <div style="margin-top:14px;border-top:1px solid #2a2a2a;padding-top:10px;display:flex;gap:8px">
+      <button id="mexc-acc-refresh" onclick="mexcAccFetch()" style="flex:1;padding:6px;background:transparent;border:1px solid #ff8c00;border-radius:6px;color:#ff8c00;font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:700;cursor:pointer">⟳ FETCH BALANCE</button>
+      <button onclick="mexcAccCloseCard()" style="padding:6px 12px;background:transparent;border:1px solid #333;border-radius:6px;color:#888;font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:700;cursor:pointer">CLOSE</button>
+    </div>
+    <div id="mexc-acc-card-ts" style="font-size:7px;font-weight:700;color:#333;margin-top:6px;text-align:right"></div>
+  </div>
+</div>
   </body>
 </html>

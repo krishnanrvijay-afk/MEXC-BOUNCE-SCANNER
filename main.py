@@ -25,7 +25,7 @@ _scanner_log.setLevel(logging.INFO)
 _scanner_log.propagate = False
 
 from fastapi import FastAPI, HTTPException, Request, Query
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
@@ -45,6 +45,7 @@ from scanner import (
     compute_market_health, get_session_name,
 )
 import scanner as _scanner_mod  # direct access to _cooldowns dict for persistence
+import mexc_api as _mexc_api
 
 # ── Telegram config ────────────────────────────────────────────
 TELEGRAM_BOT_TOKEN  = os.environ.get("TELEGRAM_BOT_TOKEN", "")
@@ -56,6 +57,7 @@ _session_sl_counts: dict[str, int]   = {}    # "SYMBOL_DIRECTION_SESSION" -> SL 
 _session_halted:    set[str]         = set() # "SYMBOL_DIRECTION_SESSION" halted for session
 _large_sl_cooldowns: dict[str, float] = {}   # "SYMBOLDIR" -> expiry ts for 90-min cooldowns
 _prev_session:      str              = ""
+_mexc_account: dict = {}
 
 # ── Global safety state ────────────────────────────────────────────────────────
 consecutive_losses:     int   = 0
@@ -1314,6 +1316,26 @@ async def _state_heartbeat_loop():
         if app_state.open_trades:
             _save_state()
 
+async def _mexc_balance_loop():
+    while True:
+        try:
+            acc = await asyncio.to_thread(_mexc_api.get_account)
+            pos = await asyncio.to_thread(_mexc_api.get_position_count)
+            if acc:
+                _mexc_account.update({
+                    "equity":         acc.get("equity", 0),
+                    "available":      acc.get("available", 0),
+                    "margin_used":    acc.get("margin_used", 0),
+                    "unrealized_pnl": acc.get("unrealized_pnl", 0),
+                    "open_positions": pos,
+                    "fetched_at":     time.time(),
+                })
+                print(f"[MEXC BALANCE] equity=${_mexc_account['equity']:.2f} available=${_mexc_account['available']:.2f} positions={pos}")
+        except Exception as e:
+            print(f"[MEXC BALANCE] error: {e}")
+        await asyncio.sleep(60)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global mexc_client
@@ -1343,7 +1365,8 @@ async def lifespan(app: FastAPI):
     scan_task  = asyncio.create_task(_scan_loop())
     price_task = asyncio.create_task(_price_loop())
     exit_task  = asyncio.create_task(_exit_monitor_loop())
-    state_task = asyncio.create_task(_state_heartbeat_loop())
+    state_task   = asyncio.create_task(_state_heartbeat_loop())
+    balance_task = asyncio.create_task(_mexc_balance_loop())
     if _digest_task is not None and not _digest_task.done():
         _digest_task.cancel()
     yield
@@ -1351,6 +1374,7 @@ async def lifespan(app: FastAPI):
     price_task.cancel()
     exit_task.cancel()
     state_task.cancel()
+    balance_task.cancel()
     await mexc_client.close()
 
 
@@ -1383,6 +1407,13 @@ async def get_account():
         "paper_mode":      PAPER_MODE,
         "slots_used":      app_state.slots_used,
     }
+
+
+@app.get("/api/mexc-balance")
+async def get_mexc_balance():
+    if not _mexc_account:
+        return JSONResponse({"error": "MEXC balance not yet fetched"}, status_code=503)
+    return JSONResponse(_mexc_account)
 
 
 # ── Per-pair overlay endpoint ─────────────────────────────────────────────────

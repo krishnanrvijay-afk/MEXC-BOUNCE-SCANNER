@@ -2211,3 +2211,79 @@ function fmtCd(seconds) {
   if (seconds < 60) return `${seconds}s`;
   return `${Math.floor(seconds/60)}m`;
 }
+
+// ── MEXC Account Pill ────────────────────────────────────────────────────────────────────────────
+let _mexcAccMasked = false;
+let _mexcAccData   = null;
+
+function mexcAccOpenCard() {
+  document.getElementById('mexc-acc-backdrop').classList.add('open');
+}
+
+function mexcAccCloseCard() {
+  document.getElementById('mexc-acc-backdrop').classList.remove('open');
+}
+
+function mexcAccToggleMask(e) {
+  e.stopPropagation();
+  _mexcAccMasked = !_mexcAccMasked;
+  const icon = _mexcAccMasked ? '🚫' : '👁';
+  document.getElementById('mexc-acc-pill-eye').textContent  = icon;
+  document.getElementById('mexc-acc-card-eye').textContent  = icon;
+  _mexcAccRender();
+}
+
+async function mexcAccFetch() {
+  const btn = document.getElementById('mexc-acc-refresh');
+  const pv  = document.getElementById('mexc-acc-pill-val');
+  if (btn) { btn.textContent = '⟳ FETCHING…'; btn.disabled = true; }
+  if (pv)  { pv.textContent = '⟳ fetching…'; pv.style.color = '#444'; }
+  try {
+    const r = await fetch('/api/mexc-balance');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    _mexcAccData = await r.json();
+    const ts = document.getElementById('mexc-acc-card-ts');
+    if (ts) {
+      const d = new Date();
+      ts.textContent = 'FETCHED ' + d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
+    }
+    const pill = document.getElementById('mexc-acc-pill');
+    if (pill) pill.style.borderColor = '#ffb300';
+    if (btn) { btn.textContent = '⟳ REFRESH BALANCE'; btn.disabled = false; }
+    _mexcAccRender();
+  } catch(err) {
+    if (btn) { btn.textContent = '⟳ FETCH BALANCE'; btn.disabled = false; }
+    if (pv)  { pv.textContent = 'TAP FOR BALANCE'; pv.style.color = '#ff8c00'; }
+  }
+}
+
+function _mexcAccRender() {
+  if (!_mexcAccData) return;
+  const d   = _mexcAccData;
+  const msk = _mexcAccMasked;
+  const fmt = v => msk ? '••••••' : '$' + (+v).toFixed(2);
+  const pv  = document.getElementById('mexc-acc-pill-val');
+  if (pv) {
+    pv.style.fontSize   = '12px';
+    pv.style.fontWeight = '700';
+    pv.style.color      = msk ? '#333' : '#ff8c00';
+    pv.textContent      = msk ? '••••••' : '$' + (+d.equity).toFixed(2);
+  }
+  const eq = document.getElementById('mexc-acc-equity');
+  const av = document.getElementById('mexc-acc-avail');
+  const mg = document.getElementById('mexc-acc-margin');
+  const pn = document.getElementById('mexc-acc-pnl');
+  const ps = document.getElementById('mexc-acc-pos');
+  if (eq) { eq.textContent = fmt(d.equity);         eq.style.color = msk ? '#2a2a2a' : '#ffffff'; }
+  if (av) { av.textContent = fmt(d.available);      av.style.color = msk ? '#2a2a2a' : '#00e676'; }
+  if (mg) { mg.textContent = fmt(d.margin_used);    mg.style.color = msk ? '#2a2a2a' : '#b388ff'; }
+  if (pn) {
+    if (msk) { pn.textContent = '••••••'; pn.style.color = '#2a2a2a'; }
+    else {
+      const pnl = +d.unrealized_pnl;
+      pn.textContent = (pnl >= 0 ? '+' : '') + '$' + Math.abs(pnl).toFixed(2);
+      pn.style.color = pnl >= 0 ? '#00e676' : '#ff5252';
+    }
+  }
+  if (ps) { ps.textContent = d.open_positions; ps.style.color = '#ffffff'; }
+}

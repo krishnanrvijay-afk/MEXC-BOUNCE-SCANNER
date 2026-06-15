@@ -1878,7 +1878,17 @@ function _ovRulerHtml(d, dir) {
         <div style="position:absolute;top:50%;transform:translate(-50%,-50%);left:${dv}%;width:11px;height:11px;border-radius:2px;display:flex;align-items:center;justify-content:center;font-size:7px;font-weight:700;z-index:2;background:#000;${dCls}">D</div>
       </div>
       <div style="display:flex;justify-content:space-between;font-size:7px;font-weight:700;color:#fff;opacity:0.4"><span>0</span><span>25</span><span>50</span><span>75</span><span>100</span></div>`;
-      return _ovGateRowHtml('STOCH K/D', pass, note, track);
+      const kf = Math.min(100, Math.max(0, d.stoch_k_fast || 0));
+      const df_fast = Math.min(100, Math.max(0, d.stoch_d_fast || 0));
+      const isLf = dir === 'LONG';
+      const crossFast = isLf ? (kf > df_fast && kf < 25) : (kf < df_fast && kf > 75);
+      const fastLabel = 'K=' + kf.toFixed(1) + ' D=' + df_fast.toFixed(1) + (crossFast ? ' [confirms ' + dir + ']' : ' [no cross]');
+      const fastCol = crossFast ? '#b388ff' : '#444';
+      const shadowRow = '<div style="margin-top:5px;padding-top:5px;border-top:1px solid #1a1a1a;display:flex;justify-content:space-between;align-items:center">'
+        + '<span style="font-family:\'JetBrains Mono\',monospace;font-size:7px;font-weight:700;background:#0e0814;border:1px solid #b388ff44;color:#b388ff;padding:1px 5px;border-radius:3px">8,3,3 SHADOW</span>'
+        + '<span style="font-family:\'JetBrains Mono\',monospace;font-size:8px;font-weight:700;color:' + fastCol + '">' + fastLabel + '</span>'
+        + '</div>';
+      return _ovGateRowHtml('STOCH K/D', pass, note, track) + shadowRow;
     }
 
     function _ovDepthHtml(d, dir) {
@@ -2405,13 +2415,14 @@ function fmtCd(seconds) {
 
 //  BTC Regime helpers 
   function _btcRegime(btc) {
-    if (!btc) return { state:'EXEMPT', cls:'exempt', color:'#fff', label:' EXEMPT' };
-    const j1h = btc.j1h || 0;
-    if (j1h < 20)  return { state:'CONFIRMED_LONG',  cls:'confirmed', color:'#00e676', label:' CONFIRMED' };
-    if (j1h < 40)  return { state:'CAUTION_LONG',    cls:'caution',   color:'#ffb300', label:' CAUTION'  };
-    if (j1h <= 60) return { state:'STOP',            cls:'stop',      color:'#ff4646', label:'ude ab STOP'     };
-    if (j1h < 80)  return { state:'CAUTION_SHORT',   cls:'caution',   color:'#ffb300', label:' CAUTION'  };
-    return           { state:'CONFIRMED_SHORT',  cls:'confirmed', color:'#ff4646', label:' SHORT SAFE' };
+    if (!btc) return { state:'EXEMPT', cls:'exempt', color:'#fff', label:'NO DATA' };
+    const j1h = (btc && btc.j1h && btc.j1h > 0) ? btc.j1h : null;
+    if (j1h === null) return { state:'EXEMPT', cls:'exempt', color:'#fff', label:'NO DATA' };
+    if (j1h < 20)  return { state:'CONFIRMED_LONG',  cls:'confirmed', color:'#00e676', label:'[OK] LONG SAFE'   };
+    if (j1h < 40)  return { state:'CAUTION_LONG',    cls:'caution',   color:'#ffb300', label:'[!!] CAUTION'     };
+    if (j1h <= 60) return { state:'STOP',            cls:'stop',      color:'#ff4646', label:'[NO] STOP'        };
+    if (j1h < 80)  return { state:'CAUTION_SHORT',   cls:'caution',   color:'#ffb300', label:'[!!] CAUTION'     };
+    return           { state:'CONFIRMED_SHORT',  cls:'confirmed', color:'#ff4646', label:'[OK] SHORT SAFE' };
   }
 
   function _btcRegimeCardHtml(sym, btc, regime, corr) {

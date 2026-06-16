@@ -226,14 +226,16 @@ function renderHeader() {
   const { daily, account, circuit_breaker, scan_count } = STATE;
 
   const pnlEl = document.getElementById('h-pnl');
-  pnlEl.textContent = `$${(daily?.pnl || 0).toFixed(2)}`;
-  pnlEl.className   = 'hstat-value ' + ((daily?.pnl || 0) >= 0 ? 'green' : 'red');
+  pnlEl.textContent = '$' + Math.abs(daily?.pnl || 0).toFixed(2);
+  pnlEl.className   = 'hstat-value';
+  pnlEl.style.color = (daily?.pnl || 0) > 0 ? '#00e676' : ((daily?.pnl || 0) < 0 ? '#ff4646' : '#ffffff');
 
   const _upnl   = STATE?.unrealized_pnl || 0;
   const _upnlEl = document.getElementById('h-unrealized');
   if (_upnlEl) {
     _upnlEl.textContent = '$' + Math.abs(_upnl).toFixed(2);
-    _upnlEl.className   = 'hstat-value ' + (_upnl > 0 ? 'green' : _upnl < 0 ? 'red' : '');
+    _upnlEl.className   = 'hstat-value';
+    _upnlEl.style.color = _upnl > 0 ? '#00e676' : (_upnl < 0 ? '#ff4646' : '#ffffff');
   }
   document.getElementById('h-positions').textContent = account?.slots_used || 0;
   document.getElementById('h-scans').textContent     = scan_count || 0;
@@ -572,18 +574,14 @@ function setBannerTF(tf) {
     if (!el) return;
     const rg = _getBtcRegime();
     if (!rg) { el.style.display = 'none'; return; }
-    el.style.display = 'block';
-    el.className = 'btc-regime-pill-' + rg.cls;
+    el.style.cssText = 'display:flex;align-items:center;gap:6px;padding:4px 9px 4px 7px;border-radius:6px;white-space:nowrap;flex-shrink:0;background:#1a0800;border:1px solid ' + rg.color + '55';
     el.innerHTML =
-      '<div style="display:flex;align-items:center;gap:10px;padding:6px 12px;border-radius:8px;background:#1a0800;border:1px solid ' + rg.color + '55">' +
-        '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:22px;line-height:1;color:' + rg.color + '">' + rg.j1h.toFixed(0) + '</div>' +
-        '<div>' +
-          '<div style="font-size:8px;font-weight:700;color:' + rg.color + ';letter-spacing:0.04em">BTC J1H ' + rg.label + '</div>' +
-          '<div style="font-size:7px;color:#888">K=' + (rg.stochK||0).toFixed(0) + ' D=' + (rg.stochD||0).toFixed(0) + '   J15M ' + (rg.j15m||0).toFixed(0) + '</div>' +
-        '</div>' +
+      '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:13px;line-height:1;color:' + rg.color + ';font-weight:800">' + rg.j1h.toFixed(0) + '</div>' +
+      '<div>' +
+        '<div style="font-size:7px;font-weight:800;color:' + rg.color + ';line-height:1.25">' + rg.label + '</div>' +
+        '<div style="font-size:6.5px;color:#fff;font-weight:700">K=' + (rg.stochK||0).toFixed(0) + ' D=' + (rg.stochD||0).toFixed(0) + '</div>' +
       '</div>';
   }
-
   function _renderJmapRegimeBadge() {
     const el = document.getElementById('jmap-regime-badge');
     if (!el) return;
@@ -2746,7 +2744,7 @@ function _mexcAccRender() {
     if (pv) {
       pv.style.fontSize   = '12px';
       pv.style.fontWeight = '700';
-      pv.style.color      = msk ? '#333' : '#ff8c00';
+      pv.style.color      = msk ? '#333' : ((+d.equity) > 0 ? '#00e676' : ((+d.equity) < 0 ? '#ff4646' : '#ffffff'));
       pv.textContent      = msk ? '' : '$' + (+d.equity).toFixed(2);
     }
     // Card values -- always full, never masked

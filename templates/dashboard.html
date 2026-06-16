@@ -71,7 +71,7 @@
   .jb-ldot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
   .jb-ldot-pulse { animation: jb-dot-pulse 2s ease-in-out infinite; }
   .jb-tf-pills { display: flex; gap: 3px; }
-  .jb-tf-pill { font-family: 'JetBrains Mono', monospace; font-size: 9px; font-weight: 800; padding: 2px 8px; border-radius: 3px; border: 1px solid #2a2a2a; background: #111; color: #888; cursor: pointer; transition: all 0.15s; }
+  .jb-tf-pill { font-family: 'JetBrains Mono', monospace; font-size: 9px; font-weight: 800; padding: 2px 8px; border-radius: 3px; border: 1px solid #2a2a2a; background: #111; color: #ffffff; font-weight: 800; cursor: pointer; transition: all 0.15s; }
   .jb-tf-active-15M  { background: rgba(0,230,118,0.1);   border-color: rgba(0,230,118,0.4);   color: #00e676; }
   .jb-tf-active-1H   { background: rgba(255,170,0,0.1);   border-color: rgba(255,170,0,0.4);   color: #ffaa00; }
   .jb-tf-active-BOTH { background: rgba(100,160,255,0.1); border-color: rgba(100,160,255,0.4); color: #66aaff; }
@@ -522,62 +522,49 @@
 </head>
 <body>
 
-<div class="header">
-  <div class="logo"><img src="https://assets.coingecko.com/markets/images/409/small/MEXC_logo_square.jpeg" style="width:22px;height:22px;border-radius:4px;vertical-align:middle;margin-right:8px;flex-shrink:0;object-fit:cover" alt="MEXC">MEXC BOUNCE SCANNER</div>
-  <div class="header-right">
-    <div class="hstat">
-      <div class="hstat-label">DAILY P&L</div>
-      <div class="hstat-value" id="h-pnl">$0.00</div>
-    </div>
-    <div class="sep"></div>
-    <div class="hstat">
-      <div class="hstat-label">UNREALIZED</div>
-      <div class="hstat-value" id="h-unrealized">$0.00</div>
-    </div>
-    <div class="sep"></div>
-    <div class="mkt-btn-wrap">
-      <div class="mkt-btn" id="mkt-btn" onclick="toggleMarket(event)">MARKET ▾</div>
-      <div class="mkt-popover" id="mkt-popover">
-        <div class="mkt-title">MARKET SNAPSHOT</div>
-        <div class="mkt-row"><span class="mkt-label">BULL TREND 1H</span><div class="mkt-chips" id="mkt-bull"></div></div>
-        <div class="mkt-row"><span class="mkt-label">BEAR TREND 1H</span><div class="mkt-chips" id="mkt-bear"></div></div>
-        <div class="mkt-row"><span class="mkt-label">J15M OVERBOUGHT</span><div class="mkt-chips" id="mkt-ob"></div></div>
-        <div class="mkt-row"><span class="mkt-label">J15M OVERSOLD</span><div class="mkt-chips" id="mkt-os"></div></div>
+<div class="header" style="height:auto;flex-direction:column;align-items:stretch;gap:0;padding:10px 14px">
+    <div class="banner-line1" style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px">
+      <div style="display:flex;align-items:center;gap:7px;min-width:0">
+        <img src="https://assets.coingecko.com/markets/images/409/small/MEXC_logo_square.jpeg" style="width:22px;height:22px;border-radius:4px;vertical-align:middle;flex-shrink:0;object-fit:cover" alt="MEXC">
+        <span style="font-family:'Bebas Neue',sans-serif;font-size:15px;letter-spacing:0.03em;color:#fff;white-space:nowrap">MEXC BOUNCE</span>
+        <div id="mode-badge" class="mode-badge" style="padding:3px 8px;border-radius:5px;font-size:8px;font-weight:800;border:1px solid #2a4a7a;color:#5ab4ff;background:#0a1422;flex-shrink:0;white-space:nowrap"></div>
       </div>
+      <button id="settings-gear-pill" onclick="" style="background:none;border:none;cursor:pointer;font-size:20px;line-height:1;color:#fff;padding:0;flex-shrink:0">&#9881;</button>
     </div>
-    <div class="sep"></div>
-    <div style="display:flex;align-items:center;gap:5px;">
-        <div class="mh-chip mh-chip-caution" id="mhc-short" onclick="openMhOverlay()" title="Short market health — tap for details">S <span class="mhc-dot mhc-dot-caution" id="mhc-short-dot"></span></div>
-        <div class="mh-chip mh-chip-caution" id="mhc-long"  onclick="openMhOverlay()" title="Long market health — tap for details">L <span class="mhc-dot mhc-dot-caution" id="mhc-long-dot"></span></div>
+    <div class="banner-line2" style="display:flex;align-items:stretch;gap:6px;flex-wrap:nowrap;width:100%">
+      <div class="value-pill" style="display:flex;flex-direction:column;background:#0c0c0c;border:1px solid #1e1e1e;border-radius:6px;padding:4px 6px;flex:1;min-width:0">
+        <div style="font-size:6.5px;font-weight:800;color:#fff;letter-spacing:0.04em;margin-bottom:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">DAILY P&amp;L</div>
+        <div id="h-pnl" style="font-size:11px;font-weight:800;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:right">$0.00</div>
       </div>
-      <div class="sep"></div>
-      <div class="hstat">
-        <div class="hstat-label">POSITIONS</div>
-        <div class="hstat-value blue" id="h-positions">0</div>
+      <div class="value-pill" style="display:flex;flex-direction:column;background:#0c0c0c;border:1px solid #1e1e1e;border-radius:6px;padding:4px 6px;flex:1;min-width:0">
+        <div style="font-size:6.5px;font-weight:800;color:#fff;letter-spacing:0.04em;margin-bottom:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">UNREALIZED</div>
+        <div id="h-unrealized" style="font-size:11px;font-weight:800;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:right">$0.00</div>
       </div>
-    <div class="sep"></div>
-    <div class="hstat">
-      <div class="hstat-label">SCANS</div>
-      <div class="hstat-value" id="h-scans">0</div>
-    </div>
-    <div class="sep"></div>
-    <div id="mode-badge" class="mode-badge" style="display:none;"></div>
-    <div id="cb-badge" style="display:none; font-family:'JetBrains Mono',monospace; font-size:9px; font-weight:700; padding:3px 8px; border-radius:4px; background:rgba(255,68,68,0.1); color:#ff4444; border:1px solid rgba(255,68,68,0.3);">⚡ CB ACTIVE</div>
-    <div class="settings-pill" id="settings-gear-pill" onclick="" style="padding:5px 10px;border-radius:5px;font-size:10px;font-weight:700;border:1px solid #44444477;color:#aaa;background:#0c0c0c;display:flex;align-items:center;gap:6px;cursor:pointer;margin-left:8px">&#9881; SETTINGS</div>
-    <div style="display:flex;align-items:center;gap:6px;margin-left:8px">
-        <div id="mexc-acc-pill" onclick="mexcAccOpenCard()" style="display:flex;align-items:center;gap:6px;background:#1a1200;border:1px solid #ff8c00;border-radius:20px;padding:4px 12px;cursor:pointer">
-          <span style="font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:700;color:#ff8c00;letter-spacing:0.06em">MEXC</span>
-          <span id="mexc-acc-pill-val" style="font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:700;color:#ff8c00;min-width:118px;text-align:right">TAP FOR BALANCE</span>
+      <div class="balance-pill" style="display:flex;flex-direction:column;border-radius:6px;border:1px solid #2a2a2a;background:#0c0c0c;padding:4px 6px;flex:1;min-width:0">
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <div style="font-size:6.5px;font-weight:800;color:#fff;letter-spacing:0.04em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">BALANCE</div>
+          <button id="mexc-acc-pill-eye" onclick="mexcAccToggleMask(event)" style="background:none;border:none;cursor:pointer;font-size:11px;color:#fff;padding:0 0 0 4px">&#x1F576;</button>
         </div>
-        <button id="mexc-acc-pill-eye" onclick="mexcAccToggleMask(event)" style="background:none;border:none;cursor:pointer;font-size:14px;padding:0">&#x1F576;</button>
+        <div id="mexc-acc-pill-val" style="font-size:11px;font-weight:800;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:right">TAP FOR BALANCE</div>
       </div>
+    </div>
   </div>
-</div>
+  <!-- elements still referenced by JS, kept hidden -->
+  <div style="display:none">
+    <div id="cb-badge"></div>
+    <div id="h-positions"></div>
+    <div id="h-scans"></div>
+    <div id="mkt-btn"></div>
+    <div id="mkt-popover"></div>
+    <div id="mexc-acc-pill"></div>
+    <div id="mhc-short"></div><span id="mhc-short-dot"></span>
+    <div id="mhc-long"></div><span id="mhc-long-dot"></span>
+  </div>
 
-<div id="btc-regime-pill" style="display:none;padding:10px 18px;border-bottom:1px solid #1a1a1a"></div>
 
 <div class="nav-row">
   <div class="nav-pills">
+    <div id="btc-regime-pill" style="display:none"></div>
     <div class="fp active"         data-tab="grid"    data-filter="ALL"          onclick="setNav(this)">ALL</div>
     <div class="fp tab-alerts"     data-tab="alerts"  data-filter=""             onclick="setNav(this)">ALERTS <span class="fp-count" id="nav-alert-count">0</span></div>
     <div class="fp tab-pos"        data-tab="pos"     data-filter=""             onclick="setNav(this)">POSITIONS <span class="fp-count" id="nav-pos-count">0</span></div>
@@ -608,7 +595,7 @@
   <div class="jb-ruler-row" id="jb-ruler-15m">
     <div class="jb-ruler-content">
       <div class="jb-ticks">
-        <span class="jb-tick" style="color:#00e676">0</span><span class="jb-tick" style="color:#00e676">20</span><span class="jb-tick" style="color:#555">40</span><span class="jb-tick" style="color:#555">60</span><span class="jb-tick" style="color:#ff3d57">80</span><span class="jb-tick" style="color:#ff3d57">100</span>
+        <span class="jb-tick" style="color:#00e676">0</span><span class="jb-tick" style="color:#00e676">20</span><span class="jb-tick" style="color:#ffffff;font-weight:800">40</span><span class="jb-tick" style="color:#ffffff;font-weight:800">60</span><span class="jb-tick" style="color:#ff3d57">80</span><span class="jb-tick" style="color:#ff3d57">100</span>
       </div>
       <div class="jb-bar-outer">
         <div class="jb-chips-layer" id="jb-chips-15m"></div>

@@ -2632,7 +2632,7 @@ function fmtCd(seconds) {
   }
 
   //  MEXC Account Pill 
-let _mexcAccMasked = false;
+let _mexcAccMasked = true;
 let _mexcAccData   = null;
 
 function mexcAccOpenCard() {
@@ -2646,13 +2646,13 @@ function mexcAccCloseCard() {
 }
 
 function mexcAccToggleMask(e) {
-  e.stopPropagation();
-  _mexcAccMasked = !_mexcAccMasked;
-  const icon = _mexcAccMasked ? '' : '';
-  document.getElementById('mexc-acc-pill-eye').textContent  = icon;
-  document.getElementById('mexc-acc-card-eye').textContent  = icon;
-  _mexcAccRender();
-}
+    e.stopPropagation();
+    _mexcAccMasked = !_mexcAccMasked;
+    const icon = _mexcAccMasked ? '&#x1F576;' : '&#x1F441;';
+    const eye1 = document.getElementById('mexc-acc-pill-eye');
+    if (eye1) eye1.innerHTML = icon;
+    _mexcAccRender();
+  }
 
 async function mexcAccFetch() {
   const btn = document.getElementById('mexc-acc-refresh');
@@ -2679,32 +2679,33 @@ async function mexcAccFetch() {
 }
 
 function _mexcAccRender() {
-  if (!_mexcAccData) return;
-  const d   = _mexcAccData;
-  const msk = _mexcAccMasked;
-  const fmt = v => msk ? '' : '$' + (+v).toFixed(2);
-  const pv  = document.getElementById('mexc-acc-pill-val');
-  if (pv) {
-    pv.style.fontSize   = '12px';
-    pv.style.fontWeight = '700';
-    pv.style.color      = msk ? '#333' : '#ff8c00';
-    pv.textContent      = msk ? '' : '$' + (+d.equity).toFixed(2);
-  }
-  const eq = document.getElementById('mexc-acc-equity');
-  const av = document.getElementById('mexc-acc-avail');
-  const mg = document.getElementById('mexc-acc-margin');
-  const pn = document.getElementById('mexc-acc-pnl');
-  const ps = document.getElementById('mexc-acc-pos');
-  if (eq) { eq.textContent = fmt(d.equity);         eq.style.color = msk ? '#2a2a2a' : '#ffffff'; }
-  if (av) { av.textContent = fmt(d.available);      av.style.color = msk ? '#2a2a2a' : '#00e676'; }
-  if (mg) { mg.textContent = fmt(d.margin_used);    mg.style.color = msk ? '#2a2a2a' : '#b388ff'; }
-  if (pn) {
-    if (msk) { pn.textContent = ''; pn.style.color = '#2a2a2a'; }
-    else {
+    if (!_mexcAccData) return;
+    const d   = _mexcAccData;
+    const msk = _mexcAccMasked;
+    // Sync eye icon with current mask state
+    const eye1 = document.getElementById('mexc-acc-pill-eye');
+    if (eye1) eye1.innerHTML = msk ? '&#x1F576;' : '&#x1F441;';
+    // Pill equity value -- respects mask
+    const pv  = document.getElementById('mexc-acc-pill-val');
+    if (pv) {
+      pv.style.fontSize   = '12px';
+      pv.style.fontWeight = '700';
+      pv.style.color      = msk ? '#333' : '#ff8c00';
+      pv.textContent      = msk ? '' : '$' + (+d.equity).toFixed(2);
+    }
+    // Card values -- always full, never masked
+    const eq = document.getElementById('mexc-acc-equity');
+    const av = document.getElementById('mexc-acc-avail');
+    const mg = document.getElementById('mexc-acc-margin');
+    const pn = document.getElementById('mexc-acc-pnl');
+    const ps = document.getElementById('mexc-acc-pos');
+    if (eq) { eq.textContent = '$' + (+d.equity).toFixed(2);      eq.style.color = '#ffffff'; }
+    if (av) { av.textContent = '$' + (+d.available).toFixed(2);   av.style.color = '#00e676'; }
+    if (mg) { mg.textContent = '$' + (+d.margin_used).toFixed(2); mg.style.color = '#b388ff'; }
+    if (pn) {
       const pnl = +d.unrealized_pnl;
       pn.textContent = (pnl >= 0 ? '+' : '') + '$' + Math.abs(pnl).toFixed(2);
       pn.style.color = pnl >= 0 ? '#00e676' : '#ff5252';
     }
+    if (ps) { ps.textContent = d.open_positions; ps.style.color = '#ffffff'; }
   }
-  if (ps) { ps.textContent = d.open_positions; ps.style.color = '#ffffff'; }
-}

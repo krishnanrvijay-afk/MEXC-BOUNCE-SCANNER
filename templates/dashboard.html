@@ -567,11 +567,13 @@
     <div class="sep"></div>
     <div id="mode-badge" class="mode-badge" style="display:none;"></div>
     <div id="cb-badge" style="display:none; font-family:'JetBrains Mono',monospace; font-size:9px; font-weight:700; padding:3px 8px; border-radius:4px; background:rgba(255,68,68,0.1); color:#ff4444; border:1px solid rgba(255,68,68,0.3);">⚡ CB ACTIVE</div>
-    <div id="mexc-acc-pill" onclick="mexcAccOpenCard()" style="display:flex;align-items:center;gap:6px;background:#1a1200;border:1px solid #ff8c00;border-radius:20px;padding:4px 12px;cursor:pointer;margin-left:8px">
-      <span style="font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:700;color:#ff8c00;letter-spacing:0.06em">MEXC</span>
-      <span id="mexc-acc-pill-val" style="font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:700;color:#ff8c00">TAP FOR BALANCE</span>
-      <span id="mexc-acc-pill-eye" style="font-size:12px">👁</span>
-    </div>
+    <div style="display:flex;align-items:center;gap:6px;margin-left:8px">
+        <div id="mexc-acc-pill" onclick="mexcAccOpenCard()" style="display:flex;align-items:center;gap:6px;background:#1a1200;border:1px solid #ff8c00;border-radius:20px;padding:4px 12px;cursor:pointer">
+          <span style="font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:700;color:#ff8c00;letter-spacing:0.06em">MEXC</span>
+          <span id="mexc-acc-pill-val" style="font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:700;color:#ff8c00">TAP FOR BALANCE</span>
+        </div>
+        <button id="mexc-acc-pill-eye" onclick="mexcAccToggleMask(event)" style="background:none;border:none;cursor:pointer;font-size:14px;padding:0">&#x1F576;</button>
+      </div>
   </div>
 </div>
 
@@ -702,7 +704,6 @@
   <div id="mexc-acc-card" onclick="event.stopPropagation()" style="background:#0d0d0d;border:1px solid #ff8c00;border-radius:10px;padding:20px;width:320px;font-family:'JetBrains Mono',monospace">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
       <span style="font-family:'Bebas Neue',sans-serif;font-size:20px;color:#ff8c00;letter-spacing:0.06em">MEXC ACCOUNT</span>
-      <span id="mexc-acc-card-eye" onclick="mexcAccToggleMask(event)" style="cursor:pointer;font-size:16px">👁</span>
     </div>
     <div style="display:flex;flex-direction:column;gap:8px">
       <div style="display:flex;justify-content:space-between"><span style="font-size:9px;font-weight:700;color:#ff8c00">EQUITY</span><span id="mexc-acc-equity" style="font-size:13px;font-weight:700;color:#fff">—</span></div>

@@ -553,7 +553,6 @@
   <div style="display:none">
     <div id="cb-badge"></div>
     <div id="h-positions"></div>
-    <div id="h-scans"></div>
     <div id="mkt-btn"></div>
     <div id="mkt-popover"></div>
     <div id="mexc-acc-pill"></div>
@@ -570,7 +569,11 @@
     <div class="fp tab-pos"        data-tab="pos"     data-filter=""             onclick="setNav(this)">POSITIONS <span class="fp-count" id="nav-pos-count">0</span></div>
     <div class="fp tab-log"        data-tab="log"     data-filter=""             onclick="setNav(this)">LOG <span class="fp-count" id="nav-log-count">0</span></div>
   </div>
-  <div class="scan-status" id="scan-status">waiting for scan…</div>
+  <div style="display:flex;flex-direction:column;align-items:flex-end;margin-right:8px">
+      <div style="font-size:6.5px;font-weight:800;color:#fff;letter-spacing:0.04em">SCANS</div>
+      <div id="h-scans" style="font-size:11px;font-weight:800;color:#fff">0</div>
+    </div>
+    <div class="scan-status" id="scan-status">waiting for scan…</div>
 </div>
 
 

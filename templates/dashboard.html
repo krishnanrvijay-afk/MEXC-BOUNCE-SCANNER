@@ -56,7 +56,8 @@
   .scan-status .cd  { color: #ffaa00; }
   /* --- HDR LINE 1 --- */
   .hdr-line1 { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:8px; }
-  .hdr-line1-right { display:flex; align-items:center; gap:8px; flex-shrink:0; }
+  .hdr-line1-right { display:flex; align-items:center; gap:8px; flex-shrink:0; overflow-x:auto; scrollbar-width:none; }
+  .hdr-line1-right::-webkit-scrollbar { display:none; }
   .scans-pill { display:flex; align-items:baseline; gap:5px; background:#111; border:1px solid #2a2a2a; border-radius:6px; padding:3px 8px; flex-shrink:0; }
   .scans-pill-lbl { font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:8px; font-weight:600; color:#fff; letter-spacing:0.07em; white-space:nowrap; }
   .scans-pill-val { font-family:'Bebas Neue',Impact,sans-serif; font-size:17px; font-weight:400; color:#fff; line-height:1; }
@@ -67,9 +68,9 @@
   .priv-btn.masked::after { opacity:1; }
   /* --- HDR LINE 2 --- */
   .hdr-line2 { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
-  .hdr-stat-pill { display:flex; align-items:baseline; gap:8px; flex:0 0 auto; background:#0c0c0c; border:1px solid #1e1e1e; border-radius:6px; padding:4px 8px; }
-  .hdr-stat-lbl { font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:9px; font-weight:600; color:#fff; letter-spacing:0.07em; white-space:nowrap; }
-  .hdr-stat-val { font-family:'Bebas Neue',Impact,sans-serif; font-size:18px; font-weight:400; color:#fff; line-height:1; white-space:nowrap; }
+  .hdr-stat-pill { display:flex; align-items:baseline; gap:8px; flex:0 0 auto; background:#0c0c0c; border:1px solid #1e1e1e; border-radius:6px; padding:8px 14px; }
+  .hdr-stat-lbl { font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:11px; font-weight:600; color:#fff; letter-spacing:0.07em; white-space:nowrap; }
+  .hdr-stat-val { font-family:'Bebas Neue',Impact,sans-serif; font-size:22px; font-weight:400; color:#fff; line-height:1; white-space:nowrap; }
   /* --- MEXC ALERT BELL PILL --- */
   .mexc-alert-pill { display:flex; align-items:center; gap:5px; padding:8px 16px; border-radius:20px; font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size:11px; font-weight:600; letter-spacing:1px; cursor:pointer; background:#111; color:#fff; border:1px solid rgba(204,136,0,0.4); transition:all 0.15s; }
   .mexc-alert-pill.active { background:#ff4444; color:#000; border-color:#ff4444; }
@@ -400,9 +401,9 @@
   .pcv2-sym { font-family: 'Bebas Neue', sans-serif; font-size: 22px; letter-spacing: 1px; line-height: 1; }
   .pcv2-dir { font-size: 9px; font-weight: 800; padding: 2px 7px; border-radius: 3px; border: 1px solid; letter-spacing: 1px; }
   .pcv2-sig { font-size: 10px; font-weight: 700; color: #fff; letter-spacing: 0.5px; text-transform: uppercase; }
-  .pcv2-sc  { font-size: 9px; font-weight: 700; color: #444; }
-  .pcv2-timer { font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 700; color: #777; letter-spacing: 1px; flex-shrink: 0; }
-  .pcv2-sub { padding: 0 16px 10px; font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #444; }
+  .pcv2-sc  { font-size: 9px; font-weight: 700; color: #fff; }
+  .pcv2-timer { font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 700; color: #fff; letter-spacing: 1px; flex-shrink: 0; }
+  .pcv2-sub { padding: 0 16px 10px; font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #fff; font-weight: 600; }
   .pcv2-live { display: flex; align-items: center; gap: 8px; padding: 8px 16px 10px; border-top: 1px solid #111; }
   .pcv2-price { font-family: 'JetBrains Mono', monospace; font-size: 22px; font-weight: 700; color: #fff; line-height: 1; }
   .pcv2-pnl { font-family: 'JetBrains Mono', monospace; font-size: 15px; font-weight: 700; }
@@ -423,7 +424,7 @@
   .pcv2-metric  { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px; }
   .pcv2-ml { font-size: 8px; font-weight: 800; color: #fff; letter-spacing: 0.5px; }
   .pcv2-mv { font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 700; }
-  .pcv2-narr { margin: 0 16px 10px; padding: 5px 9px; background: #060606; border: 1px solid #181818; border-radius: 3px; font-family: 'JetBrains Mono', monospace; font-size: 9px; color: #444; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pcv2-narr { margin: 0 16px 10px; padding: 5px 9px; background: #060606; border: 1px solid #181818; border-radius: 3px; font-family: 'JetBrains Mono', monospace; font-size: 9px; color: #fff; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .pcv2-actions { display: flex; gap: 8px; padding: 0 16px 12px; }
   .pcv2-btn { flex: 1; font-family: 'JetBrains Mono', monospace; font-size: 9px; font-weight: 700; padding: 7px 4px; border-radius: 4px; cursor: pointer; letter-spacing: 0.8px; text-align: center; transition: background 0.15s; border: 1px solid; }
   .pcv2-btn-hl    { background: rgba(0,255,136,0.06);  color: #00ff88; border-color: rgba(0,255,136,0.25); }
@@ -548,30 +549,28 @@
         <span class="logo" style="color:#fff">MEXC BOUNCE <span style="color:#f97316">SCANNER</span></span>
       </div>
       <div class="hdr-line1-right">
-        <div class="scans-pill">
-          <span class="scans-pill-lbl">SCANS</span>
-          <span class="scans-pill-val" id="h-scans">0</span>
+          <div class="scans-pill">
+            <span class="scans-pill-lbl">SCANS</span>
+            <span class="scans-pill-val" id="h-scans">0</span>
+          </div>
+          <div id="mode-badge" class="mode-badge"></div>
+          <div class="hdr-stat-pill">
+            <span class="hdr-stat-lbl">DAILY P&amp;L</span>
+            <span class="hdr-stat-val" id="h-pnl">&#8226;&#8226;&#8226;&#8226;</span>
+          </div>
+          <div class="hdr-stat-pill">
+            <span class="hdr-stat-lbl">UNREALIZED</span>
+            <span class="hdr-stat-val" id="h-unrealized">&#8226;&#8226;&#8226;&#8226;</span>
+          </div>
+          <div class="hdr-stat-pill" onclick="mexcAccOpenCard()" style="cursor:pointer">
+            <span class="hdr-stat-lbl">BALANCE</span>
+            <span class="hdr-stat-val" id="h-balance">&#8226;&#8226;&#8226;&#8226;</span>
+          </div>
+          <button id="priv-toggle" class="priv-btn masked" onclick="mexcAccToggleMask(event)">&#x1F441;</button>
+          <button id="settings-gear-pill" onclick="openSettingsSheet()" style="background:none;border:none;cursor:pointer;font-size:28px;line-height:1;color:#fff;padding:0;flex-shrink:0">&#9881;</button>
         </div>
-        <div id="mode-badge" class="mode-badge"></div>
-        <button id="priv-toggle" class="priv-btn masked" onclick="mexcAccToggleMask(event)">&#x1F441;</button>
-        <button id="settings-gear-pill" onclick="openSettingsSheet()" style="background:none;border:none;cursor:pointer;font-size:28px;line-height:1;color:#fff;padding:0;flex-shrink:0">&#9881;</button>
       </div>
     </div>
-    <div class="hdr-line2">
-      <div class="hdr-stat-pill">
-        <span class="hdr-stat-lbl">DAILY P&amp;L</span>
-        <span class="hdr-stat-val" id="h-pnl">&#8226;&#8226;&#8226;&#8226;</span>
-      </div>
-      <div class="hdr-stat-pill">
-        <span class="hdr-stat-lbl">UNREALIZED</span>
-        <span class="hdr-stat-val" id="h-unrealized">&#8226;&#8226;&#8226;&#8226;</span>
-      </div>
-      <div class="hdr-stat-pill" onclick="mexcAccOpenCard()" style="cursor:pointer">
-        <span class="hdr-stat-lbl">BALANCE</span>
-        <span class="hdr-stat-val" id="h-balance">&#8226;&#8226;&#8226;&#8226;</span>
-      </div>
-    </div>
-  </div>
   <!-- elements still referenced by JS, kept hidden -->
   <div style="display:none">
     <div id="cb-badge"></div>

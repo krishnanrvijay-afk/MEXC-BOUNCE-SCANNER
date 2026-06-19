@@ -517,7 +517,7 @@ function dirRow(direction, stochK, stochD, rsi15m, depthPct) {
       <div class="dv-item">
         <span class="dv-label">STOCH</span>
         <span class="dv-val ${stochColor}">${stochK.toFixed(1)}/${stochD.toFixed(1)}</span>
-        <span style="color:#555;font-size:9px;margin-left:3px">RSI${rsi15m.toFixed(0)}</span>
+        <span style="color:#fff;font-size:9px;font-weight:700;margin-left:3px">RSI${rsi15m.toFixed(0)}</span>
       </div>
       <div class="dv-item">
         <span class="dv-label">${depthLabel}</span>
@@ -574,9 +574,9 @@ function setBannerTF(tf) {
     if (!el) return;
     const rg = _getBtcRegime();
     if (!rg) { el.style.display = 'none'; return; }
-    el.style.cssText = 'display:flex;align-items:center;gap:5px;padding:3px 8px;border-radius:6px;flex-shrink:0;background:#111;border:1px solid ' + rg.color + '55';
+    el.style.cssText = 'display:flex;align-items:center;gap:5px;padding:4px 11px;border-radius:6px;flex-shrink:0;background:#111;border:1px solid ' + rg.color + '55';
     el.innerHTML =
-      '<span style="width:7px;height:7px;border-radius:50%;background:' + rg.color + ';flex-shrink:0;display:inline-block"></span>' +
+      '<span style="width:8px;height:8px;border-radius:50%;background:' + rg.color + ';flex-shrink:0;display:inline-block"></span>' +
       '<span style="font-family:\'JetBrains Mono\',ui-monospace,Menlo,monospace;font-size:11px;font-weight:600;color:' + rg.color + ';white-space:nowrap">BTC ' + rg.label + '</span>';
   }
   function _renderJmapRegimeBadge() {
@@ -964,7 +964,7 @@ function buildPosCard(t, prices, pairStates) {
     <span class="pcv2-timer" id="${tid}">00:00:00</span>
   </div>
 
-  <div class="pcv2-sub">${lev}x  ${marginFmt}  ${openFmt}${t.session ? '  <span style="color:#aaa;font-size:10px;letter-spacing:1px">' + t.session + '</span>' : ''}</div>
+  <div class="pcv2-sub">${lev}x  ${marginFmt}  ${openFmt}${t.session ? '  <span style="color:#fff;font-size:10px;font-weight:700;letter-spacing:1px">' + t.session + '</span>' : ''}</div>
 
   <div class="pcv2-live">
     <span style="font-size:20px;color:${arrCol};line-height:1">${arrow}</span>
@@ -1025,7 +1025,7 @@ function buildPosCard(t, prices, pairStates) {
 
   <div class="pcv2-metrics">
     <div class="pcv2-metric"><span class="pcv2-ml" style="color:#fff;font-weight:700">ADX</span><span class="pcv2-mv" style="color:${adxCl(adx)}">${(+adx).toFixed(1)}</span></div>
-    <div class="pcv2-metric"><span class="pcv2-ml" style="color:#fff;font-weight:700">STOCH</span><span class="pcv2-mv" style="color:${stochCl(sK)}">${(+sK).toFixed(1)}/${(+sD).toFixed(1)}</span><span style="color:#555;font-size:9px;margin-left:3px">RSI${(+rsi).toFixed(0)}</span></div>
+    <div class="pcv2-metric"><span class="pcv2-ml" style="color:#fff;font-weight:700">STOCH</span><span class="pcv2-mv" style="color:${stochCl(sK)}">${(+sK).toFixed(1)}/${(+sD).toFixed(1)}</span><span style="color:#fff;font-size:9px;font-weight:700;margin-left:3px">RSI${(+rsi).toFixed(0)}</span></div>
     <div class="pcv2-metric"><span class="pcv2-ml" style="color:#fff;font-weight:700">J15M</span><span class="pcv2-mv" style="color:${jCl(j15m)}">${(+j15m).toFixed(1)}</span></div>
     <div class="pcv2-metric"><span class="pcv2-ml" style="color:#fff;font-weight:700">${dLbl}</span><span class="pcv2-mv" style="color:${dCol}">${(+dPct).toFixed(1)}%</span></div>
   </div>

@@ -90,12 +90,28 @@ function closeMarket() {
 }
 
 //  Scan status text (updated by ticker and by render) 
+// ── ET time formatter (mirrors HL) ──────────────────────────────────────────
+function _fmtET(epochSeconds, includeDate, includeSeconds) {
+  var _d  = new Date(epochSeconds * 1000);
+  var _pt = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/New_York',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hour12: false
+  }).formatToParts(_d);
+  var _v  = function(t) { return (_pt.find(function(x){return x.type===t;})||{}).value||''; };
+  var _tz = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York', timeZoneName: 'short'
+  }).formatToParts(_d).find(function(x){return x.type==='timeZoneName';}).value;
+  var time = _v('hour')+':'+_v('minute')+(includeSeconds ? ':'+_v('second') : '');
+  return (includeDate ? _v('year')+'-'+_v('month')+'-'+_v('day')+' ' : '')+time+' '+_tz;
+}
+
 function updateScanStatus() {
   const el = document.getElementById('scan-status');
   if (!el) return;
   if (!lastScanAt) { el.innerHTML = 'waiting for scan'; return; }
-  const d = new Date(lastScanAt * 1000);
-  const ts = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  const ts = _fmtET(lastScanAt, false, true);
   el.innerHTML = `last scan <span class="ts">${ts}</span>  #${STATE?.scan_count||0}  <span class="cd">next in ${_scanCdSec}s</span>`;
 }
 
@@ -930,7 +946,7 @@ function buildPosCard(t, prices, pairStates) {
   const pnlTrailStop = trailStop ? dollarAt(trailStop) : 0;
 
   // Subheader
-  const openFmt   = openedAt ? new Date(openedAt*1000).toISOString().replace('T',' ').slice(0,19) : '';
+  const openFmt   = openedAt ? _fmtET(openedAt, true, true) : '';
   const marginFmt = margin >= 1000 ? `$${(margin/1000).toFixed(1)}k` : `$${Math.round(margin)}`;
 
   // Metrics (live from pair state, fallback to trade snapshot)
@@ -1480,8 +1496,8 @@ function renderLogTab() {
     const rColor   = (r.r_value||0) >= 0 ? '#555'    : '#ff4444';
     const dur      = r.duration_seconds || 0;
     const durStr   = dur < 3600 ? `${Math.floor(dur/60)}m` : `${Math.floor(dur/3600)}h${Math.floor((dur%3600)/60)}m`;
-    const openTime = r.timestamp_opened ? new Date(r.timestamp_opened*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) : '';
-    const closeTime= r.timestamp_closed ? new Date(r.timestamp_closed*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) : '';
+    const openTime = r.timestamp_opened ? _fmtET(r.timestamp_opened, false, false) : '';
+    const closeTime= r.timestamp_closed ? _fmtET(r.timestamp_closed, false, false) : '';
     const isLong   = r.direction === 'LONG';
     const _sessC = { ASIA: '#9966ff', EU: '#4488ff', US: '#00ff88', OFF: '#888' };
     const _sCol  = _sessC[r.session_opened] || '#555';
@@ -2135,11 +2151,9 @@ function _ovHistHtml(hist) {
     const pnl   = h.pnl_usd || 0;
     const pc    = pnl >= 0 ? '#00e676' : '#ff3d57';
     const dirCl = h.direction === 'LONG' ? 'card-dir-l' : 'card-dir-s';
-    const ts    = h.timestamp_closed
-      ? new Date(h.timestamp_closed * 1000).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})
-      : '';
+    const ts    = h.timestamp_closed ? _fmtET(h.timestamp_closed, false, false) : '';
     return `<div class="pov-hr">
-      <span style="color:#333;min-width:36px">${ts}</span>
+      <span style="color:#aaa;min-width:52px">${ts}</span>
       <span class="${dirCl}" style="font-size:8px;padding:1px 5px">${h.direction}</span>
       <span style="color:#555">${fmtPrice(h.entry_price)}</span>
       <span style="color:${rc(h.exit_reason)};font-weight:800">${h.exit_reason||''}</span>
@@ -2678,7 +2692,7 @@ async function mexcAccFetch() {
     const ts = document.getElementById('mexc-acc-card-ts');
     if (ts) {
       const d = new Date();
-      ts.textContent = 'FETCHED ' + d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
+      ts.textContent = 'FETCHED ' + _fmtET(Date.now() / 1000, false, true);
     }
     const pill = document.getElementById('mexc-acc-pill');
     if (pill) pill.style.borderColor = '#ffb300';
@@ -3115,7 +3129,7 @@ function buildLiveCard(t, prices) {
   const trailLbl  = trailStop ? fmtP(trailStop) : '';
   const bestLbl   = trailBest ? fmtP(trailBest) : '';
 
-  const openDt   = openedAt ? new Date(openedAt * 1000).toISOString().slice(0,16).replace('T',' ') : '\u2014';
+  const openDt   = openedAt ? _fmtET(openedAt, true, false) : '\u2014';
   const metaStr  = lev + '\u00D7 $' + margin.toFixed(0) + ' \u00B7 ' + openDt + (session ? ' \u00B7 ' + session : '');
 
   const pnlAbs   = Math.abs(pnl);

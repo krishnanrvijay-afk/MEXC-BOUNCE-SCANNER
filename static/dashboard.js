@@ -630,16 +630,18 @@ function setBannerTF(tf) {
       return { sym: p.symbol, j, longConf, shortConf };
     }).sort((a, b) => a.j - b.j);
 
-    // Anti-overlap: up to 3 stagger rows  pairs within 6 pts try next row
-      const NUM_ROWS = 3;
-      const rowEdge = new Array(NUM_ROWS).fill(undefined);
+    // Anti-overlap: up to 5 stagger rows — 15-pt clearance (MEXC labels ~9 chars); fallback to least-crowded row
+      const NUM_ROWS = 5;
+      const rowEdge = new Array(NUM_ROWS).fill(-Infinity);
       const placed = items.map(item => {
-        let row = 0;
+        let row = 0, bestRow = 0, bestSlack = -Infinity;
         for (let r = 0; r < NUM_ROWS; r++) {
-          if (rowEdge[r] === undefined || rowEdge[r] <= item.j - 5) { row = r; break; }
-          row = Math.min(r + 1, NUM_ROWS - 1);
+          const slack = item.j - rowEdge[r];
+          if (slack >= 15) { row = r; bestRow = -1; break; }
+          if (slack > bestSlack) { bestSlack = slack; bestRow = r; }
         }
-        rowEdge[row] = item.j + 5;
+        if (bestRow !== -1) row = bestRow;
+        rowEdge[row] = item.j + 15;
         return { ...item, row };
       });
 
@@ -649,7 +651,7 @@ function setBannerTF(tf) {
         ? (j < 20 ? '#00e676' : j < 35 ? 'rgba(0,230,118,0.5)' : j < 65 ? 'rgba(255,255,255,0.4)' : j < 80 ? 'rgba(255,61,87,0.5)' : '#ff3d57')
         : (j < 40 ? '#00e676' : j < 50 ? 'rgba(0,230,118,0.5)' : j < 60 ? 'rgba(255,255,255,0.4)' : j < 70 ? 'rgba(255,61,87,0.5)' : '#ff3d57');
       const pulseCls   = isConf ? ' cb-conf' : '';
-      const extraBot   = row * 16;
+      const extraBot   = row * 18;
       return `<div class="cb-chip${pulseCls}" style="left:${j.toFixed(1)}%;bottom:${extraBot}px;color:${col}">${sym}${isConf ? '' : ''}<div class="cb-tick"></div></div>`;
     }).join('');
   }

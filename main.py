@@ -1249,11 +1249,17 @@ def _do_close_trade(key: str, trade: dict, exit_price: float, reason: str):
     print(f"[EXIT] {sym} {direction} closed at {exit_price} reason={reason} "
           f"pnl=${pnl:.2f} r={r:+.2f}R")
     if TELEGRAM_ENABLED:
-        def _exit_tg(r=reason, s=sym, d=direction, ep=exit_price, p=pnl, dp=daily_pnl):
+        _pd_peak_tg = _peak_shadow.get(key, {}).get("peak_pnl_usd", 0.0)
+        def _exit_tg(r=reason, s=sym, d=direction, ep=exit_price, p=pnl, dp=daily_pnl, pk=_pd_peak_tg):
             sl_lbl = "S" if d == "SHORT" else "L"
             if r == "SL":
                 _tg_post("\u274C " + s + " " + sl_lbl + " \u00B7 SL at " + _fmt_p(ep)
                          + "\n\u2212$" + f"{abs(p):.2f}" + " \u00B7 day " + ("+" if dp >= 0 else "-") + "$" + f"{abs(dp):.2f}")
+            elif r == "PEAK_DECAY_20":
+                _tg_post("\U0001F6E1\uFE0F SENTINEL \u2014 " + s + " " + sl_lbl + " \u00B7 peak-decay exit at " + _fmt_p(ep)
+                         + "\nPeaked +$" + f"{pk:.2f}" + " \u2192 locked +$" + f"{p:.2f}"
+                         + " (" + f"{round((1 - (p/pk)) * 100, 1) if pk else 0}" + "% given back)"
+                         + "\nProtected capital before further decay")
             else:
                 _tg_post("\U0001F535 " + s + " " + sl_lbl + " \u00B7 closed (" + r + ") at " + _fmt_p(ep)
                          + "\n" + ("+" if p >= 0 else "-") + "$" + f"{abs(p):.2f}")
@@ -1459,6 +1465,15 @@ async def _exit_monitor_loop():
                                           " elapsed=" + str(round(_ash_ela, 1)) + "m" +
                                           " sl_pct=" + str(round(_sl_pct_a * 100, 1)) + "%" +
                                           " pnl=$" + str(_ash_pnl))
+                                    if TELEGRAM_ENABLED:
+                                        def _adverse_watch_tg(sym=sym, direction=direction, rule=_rname, elapsed=_ash_ela, pct=_sl_pct_a, pnl=_ash_pnl):
+                                            d_lbl = "S" if direction == "SHORT" else "L"
+                                            _tg_post("\U0001F7E7\U0001F7E7\U0001F7E7 ADVERSE WATCH \U0001F7E7\U0001F7E7\U0001F7E7"
+                                                     + "\n<b>" + sym + " " + d_lbl + " \u00B7 Rule " + rule + "</b>"
+                                                     + "\n" + f"{elapsed:.0f}" + "min elapsed \u00B7 " + f"{pct*100:.0f}" + "% to SL"
+                                                     + "\nCurrent: " + ("+" if pnl >= 0 else "-") + "$" + f"{abs(pnl):.2f}"
+                                                     + "\n<i>Observation only \u2014 no action taken</i>")
+                                        threading.Thread(target=_adverse_watch_tg, daemon=True).start()
                     elif key in _adverse_shadow and not _adverse_shadow[key]["ever_recovered"]:
                         _adverse_shadow[key]["ever_recovered"] = True
                 except Exception as _ash_e:
@@ -1534,6 +1549,17 @@ async def _exit_monitor_loop():
                           f"{'TP1 TRIGGERED -> partial close' if tp1_reached else 'watching tp1'}")
                     if tp1_reached:
                         _do_partial_close_tp1(key, trade, current)
+                        continue
+
+                # -- NEAR_USDT peak-decay real exit (Sentinel) ------------------
+                if sym == "NEAR_USDT" and not tp1_hit and _sh["peak_pnl_usd"] > 20:
+                    if _cpnl < _sh["peak_pnl_usd"] * 0.80:
+                        # NOTE: PAPER_MODE-only as of this build. If PAPER_MODE is ever
+                        # set to False, this exit MUST also call
+                        # await mexc_client.close_position(sym, direction, trade.get("remaining_size", trade.get("size", 0)))
+                        # BEFORE _do_close_trade below — otherwise the real exchange
+                        # position stays open while internal state shows it closed.
+                        _do_close_trade(key, trade, current, "PEAK_DECAY_20")
                         continue
 
                 # -- TRAILBLAZER: ATR trailing stop after tp1_hit --------------

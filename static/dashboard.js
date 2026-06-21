@@ -68,6 +68,7 @@ function setNav(el) {
   document.getElementById('tab-alerts').style.display    = activeTab === 'alerts' ? 'block' : 'none';
   document.getElementById('tab-positions').style.display = activeTab === 'pos'    ? 'block' : 'none';
   document.getElementById('tab-log').style.display       = activeTab === 'log'    ? 'block' : 'none';
+  document.getElementById('tab-live').style.display      = activeTab === 'live'   ? 'block' : 'none';
 
   if (STATE) render();
 }
@@ -208,6 +209,7 @@ function render() {
   if (activeTab === 'alerts') renderAlertsTab();
   if (activeTab === 'pos')    renderPositionsTab();
   if (activeTab === 'log')    renderLogTab();
+  if (activeTab === 'live')   renderLiveTab();
   if (marketOpen)             updateMarketPopover();
 }
 
@@ -219,6 +221,12 @@ function updateNavCounts() {
   document.getElementById('nav-alert-count').textContent = alerts.length;
   document.getElementById('nav-pos-count').textContent   = Object.keys(trades).length;
   document.getElementById('nav-log-count').textContent   = log.length;
+  const _liveCount = Object.values(trades).filter(t => t.paper === false).length;
+  const _lcEl = document.getElementById('nav-live-count');
+  if (_lcEl) {
+    _lcEl.textContent = _liveCount;
+    _lcEl.style.color = _liveCount > 0 ? '#f97316' : 'rgba(255,255,255,0.35)';
+  }
 }
 
 //  Header 
@@ -3035,5 +3043,171 @@ async function _ltSubmit() {
   } catch (e) {
     if (btn) { btn.disabled = false; btn.textContent = "ARM ORDER"; }
     alert("Request failed: " + e);
+  }
+}
+
+// ── LIVE TRADES TAB ─────────────────────────────────────────────────────────
+function renderLiveTab() {
+  const trades     = STATE.open_trades || {};
+  const prices     = STATE.prices      || {};
+  const liveTrades = Object.values(trades).filter(t => t.paper === false);
+  const el = document.getElementById('live-grid');
+  if (!liveTrades.length) {
+    el.innerHTML =
+      '<div class="empty-live">' +
+        '<div class="empty-live-icon">\u{1F4E1}</div>' +
+        '<div class="empty-live-title">No live positions open</div>' +
+        '<div class="empty-live-sub">Tap OPEN LIVE on any active alert card<br>to place a real order on MEXC.</div>' +
+      '</div>';
+    return;
+  }
+  el.innerHTML = liveTrades.map(t => buildLiveCard(t, prices)).join('');
+}
+
+function buildLiveCard(t, prices) {
+  const sym       = t.symbol;
+  const isLong    = t.direction === 'LONG';
+  const current   = t.current_price || prices[sym] || t.entry_price || 0;
+  const entry     = t.entry_price   || 0;
+  const sl        = t.sl_price      || 0;
+  const tp1       = t.tp1_price     || 0;
+  const trailBest = t.trail_best_price || 0;
+  const trailStop = t.trail_stop_price || 0;
+  const pnl       = t.unrealized_pnl  || 0;
+  const r         = t.r               || 0;
+  const lev       = t.leverage        || 5;
+  const margin    = t.margin          || 0;
+  const openedAt  = t.opened_at       || 0;
+  const session   = t.session         || '';
+  const exch      = t.exchange        || 'MEXC';
+  const dirLbl    = isLong ? 'LONG' : 'SHORT';
+  const dirCol    = isLong ? '#22c55e' : '#ef4444';
+  const pnlCol    = pnl >= 0 ? '#22c55e' : '#ef4444';
+  const rCol      = r   >= 0 ? '#22c55e' : '#ef4444';
+
+  // delta
+  const delta  = current - entry;
+  const absD   = Math.abs(delta);
+  const dStr   = (delta >= 0 ? '+' : '-') + (absD >= 1 ? absD.toFixed(4) : absD.toFixed(6));
+  const dCol   = isLong ? (delta >= 0 ? '#22c55e' : '#ef4444')
+                        : (delta <= 0 ? '#22c55e' : '#ef4444');
+
+  // ruler
+  const oneR     = Math.abs(entry - sl);
+  const twoR     = isLong ? entry + 2 * oneR : entry - 2 * oneR;
+  const barRange = twoR - sl;
+  function bp(price) {
+    if (!barRange || !sl) return 50;
+    return Math.min(100, Math.max(0, (price - sl) / barRange * 100));
+  }
+  const curPct   = bp(current);
+  const tp1Pct   = bp(tp1);
+  const trailPct = trailStop ? bp(trailStop) : 0;
+
+  function fmtP(p) {
+    return p >= 1000 ? p.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})
+         : p >= 1   ? p.toFixed(4)
+                    : p.toFixed(6);
+  }
+  const curStr    = fmtP(current);
+  const slLbl     = sl        ? fmtP(sl)        : '\u2014';
+  const tp1Lbl    = tp1       ? fmtP(tp1)       : '\u2014';
+  const trailLbl  = trailStop ? fmtP(trailStop) : '';
+  const bestLbl   = trailBest ? fmtP(trailBest) : '';
+
+  const openDt   = openedAt ? new Date(openedAt * 1000).toISOString().slice(0,16).replace('T',' ') : '\u2014';
+  const metaStr  = lev + '\u00D7 $' + margin.toFixed(0) + ' \u00B7 ' + openDt + (session ? ' \u00B7 ' + session : '');
+
+  const pnlAbs   = Math.abs(pnl);
+  const pnlStr   = (pnl >= 0 ? '+$' : '-$') + pnlAbs.toFixed(2);
+  const rStr     = (r >= 0 ? '+' : '') + r.toFixed(2) + 'R';
+
+  const sz       = t.remaining_size || t.size || 0;
+  const slDollar = sl && entry && sz ? Math.abs((isLong ? sl-entry : entry-sl) * sz).toFixed(0) : '';
+  const tpDollar = tp1 && entry && sz ? Math.abs((isLong ? tp1-entry : entry-tp1) * sz).toFixed(0) : '';
+
+  // indicator data from pair_states
+  const ps      = (STATE.pair_states || []).find(p => p.symbol === sym) || {};
+  const adxVal  = ps.adx15m != null  ? ps.adx15m.toFixed(1)                                     : '\u2014';
+  const kdVal   = (ps.stoch_k != null && ps.stoch_d != null) ? Math.round(ps.stoch_k) + '/' + Math.round(ps.stoch_d) : '\u2014';
+  const j15mVal = ps.j15m    != null  ? ps.j15m.toFixed(1)                                      : '\u2014';
+  const bidVal  = ps.bid_pct != null  ? (ps.bid_pct * 100).toFixed(1) + '%'                     : '\u2014';
+  const scanParts = [
+    ps.j15m    != null ? 'J '   + ps.j15m.toFixed(1)          : null,
+    ps.bid_pct != null ? 'BID ' + (ps.bid_pct*100).toFixed(1) + '%' : null,
+    ps.adx15m  != null ? 'ADX ' + ps.adx15m.toFixed(1)        : null,
+    ps.rsi15m  != null ? 'RSI ' + ps.rsi15m.toFixed(1)        : null,
+  ].filter(Boolean);
+  const scanLine = scanParts.length ? scanParts.join(' \u00B7 ') : 'No scan data available';
+
+  return (
+    '<div class="live-card">' +
+      '<div class="lc-header">' +
+        '<span style="font-size:9px;font-weight:700;padding:3px 7px;border-radius:5px;' +
+              'background:rgba(249,115,22,0.12);color:#f97316;border:1px solid rgba(249,115,22,0.35);">' + exch + '</span>' +
+        '<span style="font-size:9px;font-weight:700;padding:3px 7px;border-radius:5px;' +
+              'background:' + (isLong?'rgba(34,197,94,0.12)':'rgba(239,68,68,0.12)') + ';' +
+              'color:' + dirCol + ';' +
+              'border:1px solid ' + (isLong?'rgba(34,197,94,0.3)':'rgba(239,68,68,0.3)') + ';">' + dirLbl + '</span>' +
+        '<span class="live-badge"><span class="live-badge-dot"></span>LIVE</span>' +
+        '<span class="lc-pair">' + sym.replace('_USDT','') + '</span>' +
+        '<span class="lc-meta">' + metaStr + '</span>' +
+      '</div>' +
+      '<div class="lc-pnl-row">' +
+        '<span class="lc-current bebas">' + curStr + '</span>' +
+        '<span class="lc-delta" style="color:' + dCol + ';">' + dStr + '</span>' +
+        '<span class="lc-pnl"  style="color:' + pnlCol + ';">' + pnlStr + '</span>' +
+        '<span class="lc-r"    style="color:' + rCol   + ';">' + rStr   + '</span>' +
+      '</div>' +
+      '<div class="lc-ruler-wrap">' +
+        '<div class="lc-ruler-track"><div class="lc-ruler-fill" style="width:' + Math.min(100,Math.max(0,curPct)).toFixed(1) + '%;"></div></div>' +
+        '<div class="lc-ruler-dot" style="left:' + curPct.toFixed(1) + '%;"></div>' +
+      '</div>' +
+      '<div class="lc-ruler-labels">' +
+        '<span style="color:#ef4444;">SL ' + slLbl + '</span>' +
+        '<span style="color:#fbbf24;">BE</span>' +
+        '<span style="color:#22c55e;">TP1 ' + tp1Lbl + '</span>' +
+        (trailLbl ? '<span style="color:#22d3ee;">TRAIL ' + trailLbl + '</span>' : '') +
+        (bestLbl  ? '<span style="color:#fff;">BEST ' + bestLbl + '</span>' : '') +
+      '</div>' +
+      '<div class="lc-ruler-dollar-row">' +
+        '<span>' + (slDollar ? '-$' + slDollar : '') + '</span>' +
+        '<span>$0</span>' +
+        '<span>' + (tpDollar ? '+$' + tpDollar : '') + '</span>' +
+      '</div>' +
+      '<div class="lc-indicators">' +
+        '<div class="lc-ind-cell"><span class="lc-ind-label">ADX</span><span class="lc-ind-value">' + adxVal + '</span></div>' +
+        '<div class="lc-ind-cell"><span class="lc-ind-label">STOCH K/D</span><span class="lc-ind-value">' + kdVal + '</span></div>' +
+        '<div class="lc-ind-cell"><span class="lc-ind-label">J 15M</span><span class="lc-ind-value">' + j15mVal + '</span></div>' +
+        '<div class="lc-ind-cell"><span class="lc-ind-label">BID%</span><span class="lc-ind-value">' + bidVal + '</span></div>' +
+      '</div>' +
+      '<div class="lc-scan-line">' + scanLine + '</div>' +
+      '<div class="lc-btns">' +
+        '<button class="btn-close-live" onclick="closeLivePosition(\'' + sym + '\',\'' + t.direction + '\')">' +
+          '<span style="width:6px;height:6px;border-radius:50%;background:#fff;display:inline-block;animation:livePulse 1s infinite;"></span>' +
+          ' CLOSE LIVE' +
+        '</button>' +
+      '</div>' +
+    '</div>'
+  );
+}
+
+async function closeLivePosition(sym, direction) {
+  if (!confirm('Close LIVE position ' + sym + ' ' + direction + '?\nThis sends a real market order to MEXC.')) return;
+  try {
+    const r = await fetch('/api/trade/close', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ symbol: sym, direction: direction }),
+    });
+    const d = await r.json();
+    if (!r.ok) {
+      alert('Close failed: ' + (d.detail || d.msg || r.status));
+      return;
+    }
+    console.log('[CLOSE LIVE]', sym, direction, 'pnl=$' + (d.closed?.final_pnl ?? '?'));
+    fetchState();
+  } catch (e) {
+    alert('Request failed: ' + e);
   }
 }

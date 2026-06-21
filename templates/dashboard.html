@@ -282,6 +282,69 @@
   .pov-btn-force { background:rgba(255,61,87,0.1);color:#ff3d57;border:1.5px solid rgba(255,61,87,0.4); }
   .pov-btn-watch { background:transparent;color:#222;border:1.5px solid #1a1a1a;cursor:default; }
 
+  /* ── LIVE TRADES TAB NAV PILL ── */
+  .fp.tab-live { color: #f97316; border-color: rgba(249,115,22,0.35); background: rgba(249,115,22,0.05); }
+  .fp.tab-live.active { background: #f97316; color: #000; border-color: #f97316; }
+
+  /* ── LIVE CARD ── */
+  #tab-live { display: none; padding: 16px 20px; }
+  .live-card {
+    background: #0d0d0f; border: 1px solid rgba(249,115,22,0.25);
+    border-left: 3px solid #f97316; border-radius: 12px;
+    padding: 14px 16px; position: relative; overflow: hidden; margin-bottom: 12px;
+  }
+  .live-card::before {
+    content: ''; position: absolute; inset: 0;
+    background: radial-gradient(ellipse at 0% 0%, rgba(249,115,22,0.04), transparent 60%);
+    pointer-events: none;
+  }
+  .lc-header { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+  .live-badge {
+    font-size: 9px; font-weight: 700; padding: 3px 8px; border-radius: 5px;
+    background: rgba(34,197,94,0.15); color: #22c55e;
+    border: 1px solid rgba(34,197,94,0.4);
+    display: flex; align-items: center; gap: 5px;
+  }
+  .live-badge-dot {
+    width: 5px; height: 5px; border-radius: 50%; background: #22c55e;
+    box-shadow: 0 0 6px 2px rgba(34,197,94,0.8);
+    animation: livePulse 1s ease-in-out infinite;
+  }
+  @keyframes livePulse { 0%,100%{opacity:1;} 50%{opacity:0.3;} }
+  .lc-pair { font-size: 20px; font-weight: 700; color: #fff; }
+  .lc-meta { font-size: 9px; font-weight: 700; color: #fff; margin-left: auto; }
+  .lc-pnl-row { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; }
+  .lc-current { font-family: 'Bebas Neue', Impact, sans-serif; font-size: 28px; font-weight: 400; line-height: 1; color: #fff; }
+  .lc-delta { font-size: 12px; font-weight: 700; }
+  .lc-pnl { font-size: 14px; font-weight: 700; margin-left: auto; }
+  .lc-r   { font-size: 14px; font-weight: 700; }
+  .lc-ruler-wrap { position: relative; margin: 10px 0 4px; height: 32px; }
+  .lc-ruler-track { position: absolute; top: 12px; left: 0; right: 0; height: 8px; border-radius: 4px; background: #1a1a1c; overflow: hidden; }
+  .lc-ruler-fill { position: absolute; top: 0; bottom: 0; left: 0; background: linear-gradient(to right, #ef4444 0%, #fbbf24 33%, #22c55e 60%); border-radius: 4px; }
+  .lc-ruler-dot { position: absolute; top: 8px; width: 12px; height: 12px; border-radius: 50%; background: #22c55e; border: 2px solid #fff; box-shadow: 0 0 8px 2px rgba(34,197,94,0.6); transform: translateX(-50%); }
+  .lc-ruler-labels { display: flex; justify-content: space-between; font-size: 8px; font-weight: 700; color: #fff; padding: 0 2px; margin-top: 2px; }
+  .lc-ruler-dollar-row { display: flex; justify-content: space-between; font-size: 8px; font-weight: 600; color: #fff; opacity: 0.6; padding: 0 2px; margin-top: 1px; }
+  .lc-indicators { display: grid; grid-template-columns: repeat(4,1fr); gap: 8px; margin: 10px 0; }
+  .lc-ind-cell { display: flex; flex-direction: column; gap: 2px; }
+  .lc-ind-label { font-size: 8px; font-weight: 700; letter-spacing: 0.04em; color: #fff; opacity: 0.55; }
+  .lc-ind-value { font-size: 13px; font-weight: 700; color: #fbbf24; }
+  .lc-scan-line { background: #151517; border-radius: 6px; padding: 7px 9px; font-size: 9px; font-weight: 600; color: #fff; margin-bottom: 10px; line-height: 1.4; }
+  .lc-btns { display: flex; gap: 8px; }
+  .btn-close-live {
+    width: 100%; padding: 13px; border-radius: 9px;
+    background: linear-gradient(135deg, #16a34a, #15803d);
+    border: 1px solid rgba(34,197,94,0.4); color: #fff;
+    font-family: 'JetBrains Mono', monospace; font-weight: 700;
+    font-size: 12px; letter-spacing: 0.06em; cursor: pointer;
+    box-shadow: 0 0 18px rgba(34,197,94,0.25);
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+  }
+  .btn-close-live:hover { box-shadow: 0 0 26px rgba(34,197,94,0.4); }
+  .empty-live { text-align: center; padding: 40px 20px; border: 1px dashed rgba(34,197,94,0.15); border-radius: 12px; margin-top: 4px; }
+  .empty-live-icon  { font-size: 32px; margin-bottom: 10px; opacity: 0.4; }
+  .empty-live-title { font-size: 13px; font-weight: 700; color: #fff; margin-bottom: 6px; }
+  .empty-live-sub   { font-size: 10px; font-weight: 600; color: #fff; opacity: 0.5; line-height: 1.6; }
+
   /* ── ALERTS TAB ── */
   #tab-alerts { display: none; padding: 20px 24px; }
   .alert-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 10px; }
@@ -591,6 +654,7 @@
     <div class="fp tab-pos" data-tab="pos"    data-filter=""    onclick="setNav(this)">POSITIONS <span class="fp-count" id="nav-pos-count">0</span></div>
     <div class="fp tab-log" data-tab="log"    data-filter=""    onclick="setNav(this)">LOG <span class="fp-count" id="nav-log-count">0</span></div>
     <div class="mexc-alert-pill" data-tab="alerts" data-filter="" onclick="setNav(this)">&#x1F514; <span id="nav-alert-count" style="color:#ffb300;font-size:14px;font-weight:700;font-family:'JetBrains Mono',ui-monospace,Menlo,monospace">0</span></div>
+    <div class="fp tab-live" data-tab="live" data-filter="" onclick="setNav(this)">LIVE TRADES <span class="fp-count" id="nav-live-count" style="color:rgba(255,255,255,0.35)">0</span></div>
   </div>
   <div id="btc-regime-pill" style="display:none"></div>
   <div class="scan-status" id="scan-status">waiting for scan&#8230;</div>
@@ -690,6 +754,14 @@
     <div id="log-body" class="log-empty">No closed trades yet</div>
   </div>
   <div id="perf-panel"></div>
+</div>
+
+
+<!-- ── LIVE TRADES TAB ── -->
+<div id="tab-live">
+  <div id="live-grid">
+    <div class="no-content">No live positions</div>
+  </div>
 </div>
 
 

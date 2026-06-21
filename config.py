@@ -64,6 +64,5 @@ MIN_SL_PCT: dict = {
     "NEAR": 0.010,
     "LINK": 0.008,
     "ARB":  0.012,
-    "ZEC":  0.030,
 }
 MIN_SL_PCT_DEFAULT = 0.010

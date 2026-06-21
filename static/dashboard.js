@@ -746,10 +746,13 @@ function buildAlertCard(a, trades, pairMap) {
     + mkMetric('ATR',    nowAtr,     () => '#fff', 4);
 
   //  Buttons 
-  const dis      = inTrade ? 'disabled' : '';
+  const dis          = inTrade ? 'disabled' : '';
+  const hasLiveTrade = key in trades && trades[key].paper === false;
+  const disLive      = hasLiveTrade ? 'disabled' : '';
   const btnsHtml = isStale
     ? `<button class="ac-btn ac-btn-dismiss" onclick="dismissAlert('${sym}','${a.direction}')">DISMISS</button>`
-    : `<button class="ac-btn btn-hl"   ${dis} onclick="openTrade('${sym}','${a.direction}','MEXC',${a.leverage})">OPEN MEXC</button>
+    : `<button class="ac-btn btn-hl"   ${dis} style="${inTrade ? 'opacity:0.4;' : ''}" onclick="openTrade('${sym}','${a.direction}','MEXC',${a.leverage})">OPEN MEXC</button>
+       <button class="ac-btn ac-btn-live" ${disLive} style="${hasLiveTrade ? 'opacity:0.4;' : ''}" onclick="openLiveOverlay('${sym}','${a.direction}')"><span style="display:inline-block;width:7px;height:7px;background:#000;border-radius:50%;margin-right:5px;animation:liveDot 1.2s ease-in-out infinite"></span>OPEN LIVE</button>
        <button class="ac-btn ac-btn-dismiss" onclick="dismissAlert('${sym}','${a.direction}')">DISMISS</button>`;
 
   return `<div class="alert-card ${dirClass}" style="${isStale ? 'opacity:0.6;' : ''}">
@@ -2823,5 +2826,214 @@ function cfgResetArm() {
       btn.style.borderColor = '#ff4444';
       _cfgResetTimer = null;
     }, 3000);
+  }
+}
+
+// -- OPEN LIVE OVERLAY -------------------------------------------------------
+
+var _ltOvSym = null, _ltOvDir = null, _ltOvBrief = null;
+var _ltCdInterval = null, _ltArmTimeout = null, _ltArmed = false;
+
+function openLiveOverlay(sym, dir) {
+  _ltOvSym = sym; _ltOvDir = dir; _ltOvBrief = null; _ltArmed = false;
+  var bd = document.getElementById("lt-ov-bd");
+  if (!bd) return;
+  bd.classList.add("open");
+  var symEl = document.getElementById("lt-ov-sym");
+  if (symEl) symEl.textContent = sym;
+  var subEl = document.getElementById("lt-ov-sub");
+  if (subEl) subEl.textContent = dir + " · MEXC · Loading…";
+  document.getElementById("lt-ov-left").innerHTML  = "<div style=\"font-family:JetBrains Mono,monospace;font-size:11px;color:#fff;text-align:center;padding:40px 0\">Loading brief…</div>";
+  document.getElementById("lt-ov-right").innerHTML = "";
+  document.getElementById("lt-ov-confirm").innerHTML = "<div style=\"font-family:JetBrains Mono,monospace;font-size:11px;color:#555;padding:12px 0\">Loading…</div>";
+  if (_ltCdInterval) { clearInterval(_ltCdInterval); _ltCdInterval = null; }
+  _ltFetchBrief();
+}
+
+function closeLiveOverlay() {
+  var bd = document.getElementById("lt-ov-bd");
+  if (bd) bd.classList.remove("open");
+  if (_ltCdInterval) { clearInterval(_ltCdInterval); _ltCdInterval = null; }
+  if (_ltArmTimeout) { clearInterval(_ltArmTimeout); _ltArmTimeout = null; }
+  _ltOvSym = null; _ltOvDir = null; _ltArmed = false;
+}
+
+async function _ltFetchBrief() {
+  if (!_ltOvSym || !_ltOvDir) return;
+  try {
+    var r = await fetch("/api/live-brief/" + _ltOvSym + "/" + _ltOvDir);
+    if (!r.ok) throw new Error(r.status);
+    _ltOvBrief = await r.json();
+    _ltRenderBrief(_ltOvBrief);
+  } catch (e) {
+    var el = document.getElementById("lt-ov-left");
+    if (el) el.innerHTML = "<div style=\"font-family:JetBrains Mono,monospace;font-size:11px;color:#ff4444;padding:20px\">Failed to load: " + e + "</div>";
+  }
+}
+
+function _ltRenderBrief(b) {
+  var ad  = b.alert_data         || {};
+  var gs  = b.gate_status        || {};
+  var inf = b.informational_only || {};
+  var ps  = b.pair_stats         || null;
+  var dy  = b.daily              || {};
+  var sym = b.symbol, dir = b.direction;
+  var isLong = dir === "LONG";
+  var dirCol = isLong ? "#22c55e" : "#f87171";
+  var tagsEl = document.getElementById("lt-ov-tags");
+  if (tagsEl) tagsEl.innerHTML =
+    "<span style=\"background:rgba(249,115,22,0.15);border:1px solid rgba(249,115,22,0.4);border-radius:4px;padding:2px 7px;font-family:JetBrains Mono,monospace;font-size:9px;font-weight:700;color:#f97316\">MEXC</span> " +
+    "<span style=\"background:rgba(" + (isLong ? "34,197,94" : "248,113,113") + ",0.12);border:1px solid rgba(" + (isLong ? "34,197,94" : "248,113,113") + ",0.35);border-radius:4px;padding:2px 7px;font-family:JetBrains Mono,monospace;font-size:9px;font-weight:700;color:" + dirCol + "\">" + dir + "</span>" +
+    (ad.score ? " <span style=\"background:rgba(255,255,255,0.06);border:1px solid #222;border-radius:4px;padding:2px 7px;font-family:JetBrains Mono,monospace;font-size:9px;font-weight:700;color:#fff\">" + ad.score + "pts</span>" : "") +
+    (ad.tier  ? " <span style=\"background:rgba(255,170,0,0.1);border:1px solid rgba(255,170,0,0.3);border-radius:4px;padding:2px 7px;font-family:JetBrains Mono,monospace;font-size:9px;font-weight:700;color:#ffaa00\">T" + ad.tier + "</span>" : "");
+  var subEl = document.getElementById("lt-ov-sub");
+  if (subEl) subEl.textContent = "MEXC · " + dir + " · " + (ad.leverage || 5) + "x · " + (ad.session || "---");
+
+  if (_ltCdInterval) clearInterval(_ltCdInterval);
+  if (ad.fired_at) {
+    var expiryMs = ad.fired_at * 1000 + 30 * 60 * 1000;
+    var tick = function() {
+      var rem     = Math.max(0, Math.floor((expiryMs - Date.now()) / 1000));
+      var timerEl = document.getElementById("lt-cd-timer");
+      if (!timerEl) { clearInterval(_ltCdInterval); return; }
+      timerEl.textContent = String(Math.floor(rem / 60)).padStart(2, "0") + ":" + String(rem % 60).padStart(2, "0");
+      timerEl.classList.toggle("urgent", rem < 30);
+      if (rem === 0) clearInterval(_ltCdInterval);
+    };
+    tick();
+    _ltCdInterval = setInterval(tick, 1000);
+  }
+
+  var pairState = (STATE && STATE.pair_states || []).find(function(p) { return p.symbol === sym; }) || {};
+  var rows = [
+    ["ADX 1H",  (ad.adx1h  || 0).toFixed(1), (pairState.adx1h  || 0).toFixed(1)],
+    ["J 15M",   (ad.j15m   || 0).toFixed(1), (pairState.j15m   || 0).toFixed(1)],
+    ["J 1H",    (ad.j1h    || 0).toFixed(1), (pairState.j15m   || 0).toFixed(1)],
+    ["STOCH K", (ad.stoch_k|| 0).toFixed(1), (pairState.stoch_k|| 0).toFixed(1)],
+    ["STOCH D", (ad.stoch_d|| 0).toFixed(1), (pairState.stoch_d|| 0).toFixed(1)],
+  ];
+  var tblHtml = "<table class=\"lt-tbl\"><tr><th>INDICATOR</th><th>AT ALERT</th><th>RIGHT NOW</th></tr>" +
+    rows.map(function(row) {
+      var lbl = row[0], snap = row[1], cur = row[2];
+      var nv = parseFloat(cur), av = parseFloat(snap);
+      var d  = nv - av;
+      var cl = Math.abs(d) < 0.5 ? "#fff" : d > 0 ? "#22c55e" : "#f87171";
+      var ar = Math.abs(d) < 0.5 ? "" : d > 0 ? " ▲" : " ▼";
+      return "<tr><td style=\"color:#888\">" + lbl + "</td><td>" + snap + "</td><td style=\"color:" + cl + "\">" + cur + ar + "</td></tr>";
+    }).join("") + "</table>";
+
+  var statsHtml = "<div class=\"lt-sec-lbl\">PAIR HISTORY</div><div style=\"font-family:JetBrains Mono,monospace;font-size:9px;color:#555\">No history data.</div>";
+  if (ps) {
+    var f  = function(v) { return v != null ? v : "—"; };
+    var wp = function(v) { return v != null ? v + "%" : "—"; };
+    statsHtml = "<div class=\"lt-sec-lbl\">PAIR HISTORY</div><div class=\"lt-stat-grid\">" +
+      "<div class=\"lt-stat-cell\"><div class=\"lt-stat-lbl\">7-DAY WIN RATE</div><div class=\"lt-stat-val\" style=\"color:" + (ps["7d_wr"] >= 50 ? "#22c55e" : "#f87171") + "\">" + wp(ps["7d_wr"]) + "</div></div>" +
+      "<div class=\"lt-stat-cell\"><div class=\"lt-stat-lbl\">7-DAY TRADES</div><div class=\"lt-stat-val\">" + ps["7d_trades"] + "</div></div>" +
+      "<div class=\"lt-stat-cell\"><div class=\"lt-stat-lbl\">AVG BEST PEAK</div><div class=\"lt-stat-val\">" + f(ps["7d_avg_best_peak"]) + "R</div></div>" +
+      "<div class=\"lt-stat-cell\"><div class=\"lt-stat-lbl\">AVG WORST DIP</div><div class=\"lt-stat-val\" style=\"color:" + ((ps["7d_avg_worst_dip"] || 0) <= -0.5 ? "#f87171" : "#fff") + "\">" + f(ps["7d_avg_worst_dip"]) + "R</div></div>" +
+      "<div class=\"lt-stat-cell\"><div class=\"lt-stat-lbl\">ALL-TIME WIN RATE</div><div class=\"lt-stat-val\" style=\"color:" + (ps.alltime_wr >= 50 ? "#22c55e" : "#f87171") + "\">" + wp(ps.alltime_wr) + "</div></div>" +
+      "<div class=\"lt-stat-cell\"><div class=\"lt-stat-lbl\">ALL-TIME TRADES</div><div class=\"lt-stat-val\">" + ps.alltime_trades + "</div></div>" +
+      "</div><div style=\"font-family:JetBrains Mono,monospace;font-size:9px;font-weight:600;color:#fff;line-height:1.7;margin-bottom:12px\">" +
+      (ps["7d_trades"] === 0 ? "No recent history for this pair and direction." :
+       "(ps[\"7d_wr\"] >= ps.alltime_wr ? \"Recent performance is tracking above all-time average.\" : \"Recent performance is below all-time average.\")") + "</div>";
+  }
+
+  document.getElementById("lt-ov-left").innerHTML =
+    "<div class=\"lt-sec-lbl\">SIGNAL CONDITIONS</div>" + tblHtml +
+    "<div style=\"font-family:JetBrains Mono,monospace;font-size:9px;font-weight:600;color:#fff;line-height:1.7;margin-bottom:16px\">" +
+    (isLong ? "Bullish" : "Bearish") + " bounce signal on " + sym + ". Compare at-alert vs right-now to confirm conditions still hold.</div>" + statsHtml;
+
+  var gateOk = !gs.session_halted && !gs.circuit_breaker_active && !gs.daily_halted && !gs.margin_cap_reached;
+  var cdOk   = (gs.large_sl_cooldown_remaining_seconds || 0) === 0;
+  var nOpen  = (b.open_positions || []).length;
+  var dlyOk  = (dy.pnl || 0) > (dy.limit || -999);
+  var regOk  = inf.btc_regime === "CLEAR";
+  var bullets = [
+    [gateOk ? "✅" : "⚠️", gateOk ? "Gates are clear. No active blocks on this pair." :
+      "Gate block active: " + [gs.session_halted && "session halted", gs.circuit_breaker_active && "circuit breaker", gs.daily_halted && "daily limit", gs.margin_cap_reached && "margin cap"].filter(Boolean).join(", ") + "."],
+    [cdOk ? "✅" : "⚠️", cdOk ? "No cooldown active for this pair and direction." :
+      "Large-SL cooldown: " + gs.large_sl_cooldown_remaining_seconds + "s remaining."],
+    [nOpen < 3 ? "✅" : "⚠️", nOpen + " open position" + (nOpen !== 1 ? "s" : "") + " active across all pairs." + (nOpen >= 3 ? " Cluster exposure is high." : "")],
+    [dlyOk ? "✅" : "⚠️", "Daily P&L " + ((dy.pnl || 0) >= 0 ? "+" : "") + "$" + Math.abs(dy.pnl || 0).toFixed(0) + " of $" + Math.abs(dy.limit || 0) + " limit." + (!dlyOk ? " Limit approaching." : "")],
+    [regOk ? "✅" : "📊", "BTC regime: " + (inf.btc_regime || "UNKNOWN") + "." + (inf.btc_regime === "CLEAR" ? " Conditions are neutral for new entries." : " Regime may affect signal quality.")],
+  ];
+  var levelsHtml = ad.entry_price ? "<div class=\"lt-sec-lbl\">TRADE LEVELS</div><div class=\"lt-levels-grid\">" +
+    "<div class=\"lt-lvl-cell\"><div class=\"lt-lvl-lbl\">ENTRY</div><div class=\"lt-lvl-val\">" + fmtPrice(ad.entry_price) + "</div></div>" +
+    "<div class=\"lt-lvl-cell\"><div class=\"lt-lvl-lbl\">STOP LOSS</div><div class=\"lt-lvl-val\" style=\"color:#f87171\">" + fmtPrice(ad.sl_price) + "</div></div>" +
+    "<div class=\"lt-lvl-cell\"><div class=\"lt-lvl-lbl\">TARGET 1</div><div class=\"lt-lvl-val\" style=\"color:#22c55e\">" + fmtPrice(ad.tp1_price) + "</div></div>" +
+    "<div class=\"lt-lvl-cell\"><div class=\"lt-lvl-lbl\">MARGIN</div><div class=\"lt-lvl-val\">$" + Math.round(ad.margin || 150) + "</div></div></div>" : "";
+  document.getElementById("lt-ov-right").innerHTML =
+    "<div class=\"lt-sec-lbl\">ASSESSMENT</div><div style=\"margin-bottom:16px\">" +
+    bullets.map(function(b) { return "<div class=\"lt-bullet\"><span class=\"lt-bullet-icon\">" + b[0] + "</span><span class=\"lt-bullet-text\">" + b[1] + "</span></div>"; }).join("") +
+    "</div>" + levelsHtml;
+
+  _ltRenderConfirm(b);
+}
+
+function _ltRenderConfirm(b) {
+  var ad     = b.alert_data || {};
+  var margin = ad.margin || 150;
+  var confEl = document.getElementById("lt-ov-confirm");
+  if (!confEl) return;
+  if (margin >= 1000) {
+    var expected = (_ltOvSym + " " + _ltOvDir).toUpperCase();
+    confEl.innerHTML =
+      "<div style=\"font-family:JetBrains Mono,monospace;font-size:9px;font-weight:700;color:#fff;margin-bottom:6px\">Type <span style=color:#f97316>" + expected + "</span> to confirm</div>" +
+      "<input class=\"lt-confirm-input\" id=\"lt-confirm-input\" data-expected=\"" + expected + "\" placeholder=\"" + expected + "\" autocomplete=\"off\" oninput=\"_ltOnTypeInput(this)\">" +
+      "<button class=\"lt-arm-btn idle\" id=\"lt-submit-btn\" disabled onclick=\"_ltSubmit()\">SUBMIT LIVE ORDER</button>";
+  } else {
+    confEl.innerHTML =
+      "<button class=\"lt-arm-btn idle\" id=\"lt-arm-btn\" onclick=\"_ltArm(" + margin + ")\">ARM ORDER</button>";
+  }
+}
+
+function _ltOnTypeInput(el) {
+  var expected = (el.getAttribute("data-expected") || "").toUpperCase();
+  var btn = document.getElementById("lt-submit-btn");
+  if (btn) btn.disabled = el.value.trim().toUpperCase() !== expected;
+}
+
+function _ltArm(margin) {
+  if (_ltArmed) { _ltSubmit(); return; }
+  _ltArmed = true;
+  var btn = document.getElementById("lt-arm-btn");
+  if (!btn) return;
+  btn.textContent = "TAP TO CONFIRM";
+  btn.classList.replace("idle", "armed");
+  var t = 3;
+  _ltArmTimeout = setInterval(function() {
+    t--;
+    if (t <= 0) {
+      clearInterval(_ltArmTimeout); _ltArmTimeout = null;
+      _ltArmed = false;
+      var b2 = document.getElementById("lt-arm-btn");
+      if (b2) { b2.textContent = "ARM ORDER"; b2.classList.replace("armed", "idle"); }
+    }
+  }, 1000);
+}
+
+async function _ltSubmit() {
+  var sym = _ltOvSym, dir = _ltOvDir;
+  var btn = document.getElementById("lt-arm-btn") || document.getElementById("lt-submit-btn");
+  if (btn) { btn.disabled = true; btn.textContent = "PLACING ORDER…"; }
+  if (_ltCdInterval) { clearInterval(_ltCdInterval); _ltCdInterval = null; }
+  try {
+    var ad = (_ltOvBrief && _ltOvBrief.alert_data) || {};
+    var r  = await fetch("/api/trade/open", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ symbol: sym, direction: dir, exchange: "MEXC", leverage: ad.leverage || 5 }),
+    });
+    var d = await r.json();
+    if (!r.ok) {
+      if (btn) { btn.disabled = false; btn.textContent = "ARM ORDER"; }
+      alert("Order failed: " + (d.detail || d.msg || r.status));
+      return;
+    }
+    closeLiveOverlay();
+    fetchState();
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.textContent = "ARM ORDER"; }
+    alert("Request failed: " + e);
   }
 }

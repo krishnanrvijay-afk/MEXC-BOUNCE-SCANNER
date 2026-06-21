@@ -272,6 +272,7 @@ def _save_state():
             "cooldowns":              dict(_scanner_mod._cooldowns),
             "peak_shadow":            dict(_peak_shadow),
             "adverse_shadow":         dict(_adverse_shadow),
+            "signal_shadow":          dict(_signal_shadow),
             "updated_at":             datetime.now(timezone.utc).isoformat(),
         }
         sb.table("mexc_scanner_state").upsert(data, on_conflict="id").execute()

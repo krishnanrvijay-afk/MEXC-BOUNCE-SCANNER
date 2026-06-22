@@ -78,6 +78,8 @@ ADVERSE_CUT_USD: dict[str, float] = {
     "BTC_USDT":   60.0,
     "SUI_USDT":   45.0,
     "XRP_USDT":   70.0,
+    "LTC_USDT":   50.0,
+    "ADA_USDT":   55.0,
 }
 ADVERSE_CUT_DEFAULT_USD: float = 60.0
 

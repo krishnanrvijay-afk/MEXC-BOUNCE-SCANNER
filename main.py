@@ -59,6 +59,7 @@ _session_sl_counts: dict[str, int]   = {}    # "SYMBOL_DIRECTION_SESSION" -> SL 
 _session_halted:    set[str]         = set() # "SYMBOL_DIRECTION_SESSION" halted for session
 _large_sl_cooldowns: dict[str, float] = {}   # "SYMBOLDIR" -> expiry ts for 90-min cooldowns
 _peak_shadow: dict = {}   # trade_key -> shadow tracking state (observation only)
+_sentinel_sweep: list = []   # deferred PEAK_DECAY_20 exits — flushed once per scan cycle
 _adverse_shadow: dict = {}  # trade_key -> adverse-cut shadow state (observation only)
 _sign_shadow:   dict = {}  # trade_key -> PnL-sign transition history (observation only)
 _signal_shadow: dict = {}  # trade_key -> signal invalidation shadow state (observation only)
@@ -1389,20 +1390,19 @@ def _do_close_trade(key: str, trade: dict, exit_price: float, reason: str):
           f"pnl=${pnl:.2f} r={r:+.2f}R")
     if TELEGRAM_ENABLED:
         _pd_peak_tg = _peak_shadow.get(key, {}).get("peak_pnl_usd", 0.0)
-        def _exit_tg(r=reason, s=sym, d=direction, ep=exit_price, p=pnl, dp=daily_pnl, pk=_pd_peak_tg):
-            sl_lbl = "S" if d == "SHORT" else "L"
-            if r == "SL":
-                _tg_post("\u274C " + s + " " + sl_lbl + " \u00B7 SL at " + _fmt_p(ep)
-                         + "\n\u2212$" + f"{abs(p):.2f}" + " \u00B7 day " + ("+" if dp >= 0 else "-") + "$" + f"{abs(dp):.2f}")
-            elif r == "PEAK_DECAY_20":
-                _tg_post("\U0001F6E1\uFE0F SENTINEL \u2014 " + s + " " + sl_lbl + " \u00B7 peak-decay exit at " + _fmt_p(ep)
-                         + "\nPeaked +$" + f"{pk:.2f}" + " \u2192 locked +$" + f"{p:.2f}"
-                         + " (" + f"{round((1 - (p/pk)) * 100, 1) if pk else 0}" + "% given back)"
-                         + "\nProtected capital before further decay")
-            else:
-                _tg_post("\U0001F535 " + s + " " + sl_lbl + " \u00B7 closed (" + r + ") at " + _fmt_p(ep)
-                         + "\n" + ("+" if p >= 0 else "-") + "$" + f"{abs(p):.2f}")
-        threading.Thread(target=_exit_tg, daemon=True).start()
+        if reason == "PEAK_DECAY_20":
+            _pct = round((1 - (pnl / _pd_peak_tg)) * 100, 1) if _pd_peak_tg else 0
+            _sentinel_sweep.append((sym, direction, pnl, _pd_peak_tg, round(pnl, 2), _pct))
+        else:
+            def _exit_tg(r=reason, s=sym, d=direction, ep=exit_price, p=pnl, dp=daily_pnl, pk=_pd_peak_tg):
+                sl_lbl = "S" if d == "SHORT" else "L"
+                if r == "SL":
+                    _tg_post("\u274C " + s + " " + sl_lbl + " \u00B7 SL at " + _fmt_p(ep)
+                             + "\n\u2212$" + f"{abs(p):.2f}" + " \u00B7 day " + ("+" if dp >= 0 else "-") + "$" + f"{abs(dp):.2f}")
+                else:
+                    _tg_post("\U0001F535 " + s + " " + sl_lbl + " \u00B7 closed (" + r + ") at " + _fmt_p(ep)
+                             + "\n" + ("+" if p >= 0 else "-") + "$" + f"{abs(p):.2f}")
+            threading.Thread(target=_exit_tg, daemon=True).start()
     if PAPER_MODE:
         asyncio.create_task(_update_paper_trade_close(trade, exit_price, reason, pnl))
     asyncio.create_task(_write_peak_shadow_row(key, trade, reason, pnl))
@@ -1517,6 +1517,34 @@ def _do_trailblazer_close(key: str, trade: dict, exit_price: float,
 
 
 # -- Exit monitor loop -------------------------------------------------------------
+
+def _flush_sentinel_sweep() -> None:
+    """Send one consolidated Telegram message per scan cycle for PEAK_DECAY_20 exits."""
+    global _sentinel_sweep
+    exits = list(_sentinel_sweep)
+    _sentinel_sweep.clear()
+    if not exits:
+        return
+    if len(exits) == 1:
+        sym, direction, pnl, peak, locked, pct = exits[0]
+        sl_lbl = "S" if direction == "SHORT" else "L"
+        _tg_post("\U0001F6E1\uFE0F SENTINEL \u2014 " + sym + " " + sl_lbl
+                 + " \u00B7 peak-decay exit"
+                 + "\nPeaked +$" + f"{peak:.2f}" + " \u2192 locked +$" + f"{locked:.2f}"
+                 + " (" + f"{pct}" + "% given back)"
+                 + "\nProtected capital before further decay")
+    else:
+        net   = sum(e[2] for e in exits)
+        parts = []
+        for sym, direction, pnl, peak, locked, pct in exits:
+            sl_lbl = "S" if direction == "SHORT" else "L"
+            sign   = "+" if locked >= 0 else "-"
+            parts.append(sym + " " + sl_lbl + " " + sign + "$" + f"{abs(locked):.2f}")
+        _tg_post("\U0001F6E1\uFE0F SENTINEL SWEEP \u00B7 " + str(len(exits)) + " exits \u00B7 MEXC"
+                 + "\n" + " \u00B7 ".join(parts)
+                 + "\n" + "\u2500" * 32
+                 + "\nNet locked: " + ("+" if net >= 0 else "-") + "$" + f"{abs(net):.2f}")
+
 
 async def _exit_monitor_loop():
     """Runs every PRICE_INTERVAL_SECONDS. Checks every open trade against SL/TP."""
@@ -1859,6 +1887,7 @@ async def _exit_monitor_loop():
         except Exception as e:
             print(f"[EXIT MONITOR] error: {e}")
 
+        _flush_sentinel_sweep()
         await asyncio.sleep(PRICE_INTERVAL_SECONDS)
 
 

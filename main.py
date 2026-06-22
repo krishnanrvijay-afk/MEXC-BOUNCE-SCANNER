@@ -65,7 +65,23 @@ _adverse_shadow: dict = {}  # trade_key -> adverse-cut shadow state (observation
 _sign_shadow:   dict = {}  # trade_key -> PnL-sign transition history (observation only)
 _signal_shadow: dict = {}  # trade_key -> signal invalidation shadow state (observation only)
 
-# ── Bot identity ─────────────────────────────────────────────────────────────
+# -- Per-pair adverse dollar cut thresholds ------------------------------------
+# If adverse PnL <= -threshold AND max favourable excursion < $10, cut immediately.
+ADVERSE_CUT_USD: dict[str, float] = {
+    "NEAR_USDT":  55.0,
+    "WIF_USDT":   60.0,
+    "HYPE_USDT":  60.0,
+    "ETH_USDT":   55.0,
+    "DOGE_USDT":  50.0,
+    "AVAX_USDT":  45.0,
+    "SOL_USDT":   75.0,
+    "BTC_USDT":   60.0,
+    "SUI_USDT":   45.0,
+    "XRP_USDT":   70.0,
+}
+ADVERSE_CUT_DEFAULT_USD: float = 60.0
+
+# -- Bot identity ─────────────────────────────────────────────────────────────
 BOT_INSTANCE_ID: str          = "default"
 _BOT_IDENTITY_COMMITTED: bool = False
 _prev_session:      str              = ""
@@ -1600,6 +1616,19 @@ async def _exit_monitor_loop():
                 trade["extreme_price"] = min(ep, current) if is_short else max(ep, current)
                 ap = trade.get("adverse_price") or current
                 trade["adverse_price"] = max(ap, current) if is_short else min(ap, current)
+
+                # -- Adverse cut: excessive adverse move with no meaningful MFE -------
+                _adv_price = trade.get("adverse_price") or current
+                _ext_price  = trade.get("extreme_price") or current
+                _entry      = trade.get("entry_price", 0)
+                _size       = trade.get("remaining_size", trade.get("size", 0)) or 0
+                _adv_pnl    = ((_adv_price - _entry) * _size) if not is_short else ((_entry - _adv_price) * _size)
+                _mfe_pnl    = ((_ext_price - _entry) * _size) if not is_short else ((_entry - _ext_price) * _size)
+                _cut_usd    = ADVERSE_CUT_USD.get(sym, ADVERSE_CUT_DEFAULT_USD)
+                if _adv_pnl <= -_cut_usd and _mfe_pnl < 10.0:
+                    print(f"[ADVERSE_CUT] {sym} {direction} adv_pnl={_adv_pnl:.2f} cut={_cut_usd} mfe={_mfe_pnl:.2f} - closing")
+                    _do_close_trade(key, trade, current, "ADVERSE_CUT")
+                    continue
 
                 # -- Peak PnL protection shadow (observation only, no exit logic) ----
                 try:

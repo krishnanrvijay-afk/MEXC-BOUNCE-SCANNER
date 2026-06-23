@@ -23,6 +23,7 @@ def _base(sym):
 
 _last_stoch:  dict[str, tuple] = {}   # keyed symbol -> (stoch_k, stoch_d) from previous scan
 _last_stoch_fast: dict[str, tuple] = {}   # keyed symbol -> (stoch_k_fast, stoch_d_fast) 8,3,3
+_adverse_cluster: dict = {"long": [], "short": []}  # rolling adverse exit timestamps per direction
 _cooldowns:   dict[str, float] = {}   # keyed "BTCSHORT" / "BTCLONG" -> expiry ts
 _scan_count:  int              = 0
 _stale_prices: set[str]        = set()  # symbols with 5+ consecutive missing prices
@@ -417,6 +418,20 @@ async def run_full_scan(client, market_health: Optional[dict] = None) -> list[di
                 if   _btc_j1h < 20:            _regime_block_short = True
                 elif 40 <= _btc_j1h <= 60:     _regime_block_short = _regime_block_long = True
                 elif _btc_j1h > 80:            _regime_block_long  = True
+            # -- Component A: BTC fast stoch flash detector -----------------
+            _btc_fast         = _last_stoch_fast.get("BTC_USDT", (50.0, 50.0))
+            _btc_fk, _btc_fd  = _btc_fast
+            _btc_fast_margin  = _btc_fk - _btc_fd
+            if _btc_fast_margin < -15:
+                _regime_block_long  = True
+                log.info(f"[FAST_STOCH_BLOCK] BTC fast K-D={_btc_fast_margin:.1f} -> LONG entries blocked")
+            if _btc_fast_margin > 15:
+                _regime_block_short = True
+                log.info(f"[FAST_STOCH_BLOCK] BTC fast K-D={_btc_fast_margin:.1f} -> SHORT entries blocked")
+            # -- Component B: Adverse cluster directional halt ---------------
+            if len(_adverse_cluster.get("long",  [])) >= 3: _regime_block_long  = True
+            if len(_adverse_cluster.get("short", [])) >= 3: _regime_block_short = True
+
             for direction in ("SHORT", "LONG"):
                 key = f"{symbol}{direction}"
 
@@ -549,6 +564,11 @@ async def run_full_scan(client, market_health: Optional[dict] = None) -> list[di
                     "partial_price": partial_price,
                     "session":       get_session_name(),
                 }
+                _vwap_v, _vwap_pct, _vwap_pos = _compute_session_vwap(candles_15m, price)
+                if _vwap_v is not None:
+                    alert["vwap_at_entry"] = _vwap_v
+                    alert["vwap_pct_diff"] = _vwap_pct
+                    alert["vwap_position"] = _vwap_pos
                 new_alerts.append(alert)
                 log.info(f"[ALERT] {symbol} {direction} tier={tier} lev={lev}x entry={price} "
                          f"sl={sl_price} tp1={tp1_price} adx={adx1h:.1f} "
@@ -636,6 +656,36 @@ async def scan_pair_state(client) -> list[dict]:
             log.error(f"[STATE] {symbol} error: {e}")
             states.append({"symbol": symbol, "price": 0})
     return states
+
+
+
+def _compute_session_vwap(candles_15m: list, entry_price: float):
+    """Session VWAP from midnight ET. Returns (None, None, None) on any failure."""
+    try:
+        from zoneinfo import ZoneInfo as _ZI
+        from datetime import datetime as _DT, timezone as _TZ
+        _et     = _ZI("America/New_York")
+        _now_et = _DT.now(_et)
+        _mid_et = _now_et.replace(hour=0, minute=0, second=0, microsecond=0)
+        _mid_s  = _mid_et.astimezone(_TZ.utc).timestamp()
+        if not candles_15m:
+            return None, None, None
+        _ts_key = "time" if "time" in candles_15m[0] else "timestamp"
+        _is_ms  = candles_15m[0].get(_ts_key, 0) > 1_000_000_000_000
+        _thresh = _mid_s * 1000 if _is_ms else _mid_s
+        _sess   = [c for c in candles_15m if c.get(_ts_key, 0) >= _thresh]
+        if not _sess:
+            return None, None, None
+        _tpv = sum(((c["high"] + c["low"] + c["close"]) / 3.0) * c["volume"] for c in _sess)
+        _vol = sum(c["volume"] for c in _sess)
+        if _vol == 0:
+            return None, None, None
+        _vwap = _tpv / _vol
+        _pct  = (entry_price - _vwap) / _vwap * 100
+        _pos  = "ABOVE" if _pct > 0.1 else "BELOW" if _pct < -0.1 else "AT"
+        return round(_vwap, 6), round(_pct, 3), _pos
+    except Exception:
+        return None, None, None
 
 
 async def _fetch_pair_data(client, symbol: str):

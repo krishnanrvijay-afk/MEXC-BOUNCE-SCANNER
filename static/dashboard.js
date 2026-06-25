@@ -2762,7 +2762,6 @@ async function cfgFetch() {
     document.getElementById('cfg-j15m-os').value    = s.j15m_short_gate;
     document.getElementById('cfg-j15m-ob').value    = s.j15m_long_gate;
     document.getElementById('cfg-j1h-os').value     = s.j1h_short_min;
-    document.getElementById('cfg-j1h-ob').value     = s.j1h_long_max;
     document.getElementById('cfg-margin').value     = s.margin_per_trade;
     document.getElementById('cfg-dailyloss').value  = Math.abs(s.daily_loss_limit);
     document.getElementById('cfg-cb').value         = s.consecutive_loss_stop;
@@ -2794,7 +2793,6 @@ async function cfgSave() {
     j15m_short_gate:       parseFloat(document.getElementById('cfg-j15m-os').value),
     j15m_long_gate:        parseFloat(document.getElementById('cfg-j15m-ob').value),
     j1h_short_min:         parseFloat(document.getElementById('cfg-j1h-os').value),
-    j1h_long_max:          parseFloat(document.getElementById('cfg-j1h-ob').value),
     margin_per_trade:      parseFloat(document.getElementById('cfg-margin').value),
     daily_loss_limit:      -(Math.abs(daily)),
     consecutive_loss_stop: parseInt(document.getElementById('cfg-cb').value, 10),

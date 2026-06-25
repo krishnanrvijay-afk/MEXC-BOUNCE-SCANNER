@@ -2044,22 +2044,7 @@ function _ovRulerHtml(d, dir) {
         + '<span style="width:5%;text-align:center;color:#994d00">95</span>'
         + '<span style="width:5%;text-align:center;color:#994d00">100</span>'
         + '</div>';
-      const shadowRow = '<div style="margin-top:8px;padding-top:6px;border-top:1px solid #1e1e1e">'
-        + '<span style="font-family:\'JetBrains Mono\',monospace;font-size:7px;font-weight:700;background:#1a0800;border:1px solid #ff8c0044;color:#ff8c00;padding:1px 5px;border-radius:3px">8,3,3 SHADOW</span>'
-        + '<div style="font-family:\'JetBrains Mono\',monospace;font-size:12px;font-weight:700;color:#ff8c00;margin-top:4px">' + desc1f + ' for ' + (isLf ? 'LONG' : 'SHORT') + '</div>'
-        + '<div style="font-family:\'JetBrains Mono\',monospace;font-size:12px;font-weight:700;color:#ff8c00;margin-top:2px">Currently K=' + (d.stoch_k_fast||0).toFixed(1) + ' D=' + (d.stoch_d_fast||0).toFixed(1) + '</div>'
-        + '<div style="position:relative;height:16px;border-radius:4px;width:100%;margin:8px 0 0;background:linear-gradient(to right,' + gradOrangGreen + ',' + gradGrey + ',' + gradOrangRed + ')">'
-        + '<div style="position:absolute;top:50%;transform:translate(-50%,-50%);left:' + df_val.toFixed(1) + '%;width:12px;height:12px;border-radius:2px;border:1.5px solid ' + (dfZonef ? '#ff8c00' : '#7a3d00') + ';background:#000;display:flex;align-items:center;justify-content:center;z-index:1">'
-        + '<span style="font-size:7px;font-weight:700;color:' + (dfZonef ? '#ff8c00' : '#7a3d00') + ';font-family:\'JetBrains Mono\',monospace;line-height:1">D</span>'
-        + '</div>'
-        + '<div style="position:absolute;top:50%;transform:translate(-50%,-50%);left:' + kf.toFixed(1) + '%;width:14px;height:14px;border-radius:50%;background:' + (inZonef ? '#ff8c00' : '#3d1e00') + ';' + (inZonef ? 'box-shadow:0 0 8px #ff8c00,0 0 16px rgba(255,140,0,0.4);' : '') + 'display:flex;align-items:center;justify-content:center;z-index:2">'
-        + '<span style="font-size:7px;font-weight:700;color:#000;font-family:\'JetBrains Mono\',monospace;line-height:1">K</span>'
-        + '</div>'
-        + '</div>'
-        + ticksOrng
-        + '<div style="font-size:9px;color:' + noteColF + ';font-family:\'JetBrains Mono\',monospace;margin-top:4px">' + crossNotef + '</div>'
-        + '</div>';
-      return _ovGateRowHtml('STOCH K/D', pass, note, track) + shadowRow;
+      return _ovGateRowHtml('STOCH K/D (8-3-3)', pass, note, track);
     }
 
     function _ovDepthHtml(d, dir) {

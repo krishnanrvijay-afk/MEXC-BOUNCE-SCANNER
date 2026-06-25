@@ -1723,8 +1723,8 @@ function _ovStatePillHtml(state, dir) {
 function _ovGateBarsHtml(d, dir) {
   const isL     = dir !== 'SHORT';
   const snap   = (STATE?.pair_states||[]).find(p => p.symbol === d.symbol) || {};
-  const _sK    = +(snap.stoch_k != null ? snap.stoch_k : (d.stoch_k || 0));
-  const _sD    = +(snap.stoch_d != null ? snap.stoch_d : (d.stoch_d || 0));
+  const _sK    = +(snap.stoch_k_fast != null ? snap.stoch_k_fast : (d.stoch_k_fast || 0));
+  const _sD    = +(snap.stoch_d_fast != null ? snap.stoch_d_fast : (d.stoch_d_fast || 0));
   const _sJ15  = +(snap.j15m    != null ? snap.j15m    : (d.j15m    || 0));
   const _sJ1h  = +(snap.j1h     != null ? snap.j1h     : (d.j1h     || 0));
   const _sBid  = +(snap.bid_pct != null ? snap.bid_pct : (d.bid_pct || 0));
@@ -1743,9 +1743,11 @@ function _ovGateBarsHtml(d, dir) {
   const j15Col  = j15m < 20 ? '#00e676' : j15m > 80 ? '#ff3d57' : '#fff';
   const j1hCol  = j1h  < 40 ? '#00e676' : j1h  > 60 ? '#ff3d57' : '#fff';
   const rsiCol  = rsi  < 35 ? '#00e676' : rsi  > 65 ? '#ff3d57' : '#fff';
-  const stochK  = d.stoch_k || 0;
-  const stochD  = d.stoch_d || 0;
+  const stochK  = d.stoch_k_fast || 0;
+  const stochD  = d.stoch_d_fast || 0;
   const stochKC = stochK < 25 ? '#00e676' : stochK > 75 ? '#ff3d57' : '#fff';
+  const stoch14K = d.stoch_k || 0;
+  const stoch14D = d.stoch_d || 0;
   const depPct  = isL ? bid : ask;
   const depCol  = gArr[3] ? (isL ? '#00e676' : '#ff3d57') : '#fff';
   const bidW    = Math.min(100, Math.max(0, bid));
@@ -1775,7 +1777,7 @@ function _ovGateBarsHtml(d, dir) {
     </div>
     <div class="pov-gr" data-gi="2">
       <div class="${dotCls(gArr[2])}" id="pov-gd-2"></div>
-      <span class="pov-gn">STOCH</span>
+      <span class="pov-gn" style="width:auto;min-width:72px">STOCH K/D (8-3-3)</span>
       <div class="pov-gt" style="position:relative">
         <div class="pov-gzg" style="width:25%"></div>
         <div class="pov-gzr" style="left:75%;width:25%"></div>
@@ -1784,6 +1786,15 @@ function _ovGateBarsHtml(d, dir) {
         <div id="pov-gc-2d" style="position:absolute;top:50%;transform:translate(-50%,-50%);left:${Math.min(99,stochD).toFixed(1)}%;width:10px;height:10px;border-radius:2px;border:1px solid ${Math.abs(stochK-stochD)<5?'#00ff88':'rgba(136,136,136,0.7)'};background:transparent;pointer-events:none;box-shadow:${Math.abs(stochK-stochD)<5?'0 0 5px rgba(0,255,136,0.4)':'none'}"></div>
       </div>
       <span class="pov-gv" id="pov-gv-2" style="color:${stochKC}">${stochK.toFixed(1)}/${stochD.toFixed(1)}</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;opacity:0.4">
+      <div class="pov-gd pov-gd-fail" style="background:#444"></div>
+      <span class="pov-gn" style="color:#555;width:auto;min-width:72px">14,3,3 REF</span>
+      <div class="pov-gt" style="position:relative">
+        <div style="position:absolute;top:50%;transform:translate(-50%,-50%);left:${Math.min(99,stoch14D).toFixed(1)}%;width:8px;height:8px;border-radius:2px;border:1px solid #444;background:#000;pointer-events:none;z-index:1"></div>
+        <div class="pov-gcur" style="left:${Math.min(99,stoch14K).toFixed(1)}%;background:#555;border:1.5px solid #0a0a0a"></div>
+      </div>
+      <span class="pov-gv" style="color:#555">${stoch14K.toFixed(1)}/${stoch14D.toFixed(1)}</span>
     </div>
     <div class="pov-gr" data-gi="rsi">
       <div class="pov-gd pov-gd-fail" id="pov-gd-rsi" style="opacity:0.25"></div>

@@ -499,6 +499,10 @@ async def run_full_scan(client, market_health: Optional[dict] = None) -> list[di
                     _now_utc < _adverse_cooldown_until["short"]):
                 _regime_block_short = True
 
+            if (_btc_flash_block_until.get("long") and
+                    _now_utc < _btc_flash_block_until["long"]):
+                _regime_block_long = True
+
             for direction in ("SHORT", "LONG"):
                 key = f"{symbol}{direction}"
 

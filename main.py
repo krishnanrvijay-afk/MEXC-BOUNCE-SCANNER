@@ -759,14 +759,47 @@ async def _do_open_trade(
                 "bot_instance_id": BOT_INSTANCE_ID,
             }).execute()
         except Exception as _lock_e:
-            _msg = (
-                f"\u26a0 DUPLICATE BLOCKED: {symbol} {direction} on MEXC "
-                f"(bot: {BOT_INSTANCE_ID}) \u2014 another process already opened this signal"
+            _err_str = str(_lock_e).lower()
+            _is_duplicate = (
+                "duplicate" in _err_str or
+                "unique" in _err_str or
+                "conflict" in _err_str or
+                "23505" in _err_str
             )
-            if TELEGRAM_ENABLED:
-                threading.Thread(target=lambda m=_msg: _tg_post(m), daemon=True).start()
-            print(f"[LOCK CONFLICT] {lock_key} -- blocked duplicate open: {_lock_e}")
-            return None, "already_open"
+            if _is_duplicate:
+                _msg = (
+                    f"\u26a0 DUPLICATE BLOCKED: "
+                    f"{symbol} {direction} - "
+                    f"signal already open"
+                )
+            else:
+                _msg = (
+                    f"\u26a0 LOCK ERROR: "
+                    f"{symbol} {direction} - "
+                    f"Supabase unavailable, "
+                    f"allowing trade: {_lock_e}"
+                )
+                if TELEGRAM_ENABLED:
+                    threading.Thread(
+                        target=lambda m=_msg: _tg_post(m),
+                        daemon=True
+                    ).start()
+                print(f"[LOCK ERROR] {lock_key} - "
+                      f"infrastructure failure, "
+                      f"proceeding: {_lock_e}")
+                # Infrastructure failure - do not block
+                # the trade, just skip the lock
+                lock_key = None
+                # fall through to trade open
+            if _is_duplicate:
+                if TELEGRAM_ENABLED:
+                    threading.Thread(
+                        target=lambda m=_msg: _tg_post(m),
+                        daemon=True
+                    ).start()
+                print(f"[LOCK CONFLICT] {lock_key} - "
+                      f"blocked duplicate open: {_lock_e}")
+                return None, "already_open"
 
     _client = mexc_client
     sl_price = alert_data.get("sl_price") if alert_data else None
@@ -1145,6 +1178,11 @@ async def _price_loop():
             for sym, px in zip(PAIRS, results):
                 if isinstance(px, (int, float)) and px:
                     app_state.prices[sym] = float(px)
+
+            # NOTE: 24h price change fetch not implemented for MEXC.
+            # mexc_client exposes no get_all_price_changes() or bulk ticker method.
+            # app_state.price_changes will remain empty until mexc_client is extended
+            # with a 24h-change endpoint (e.g. via /api/v1/contract/ticker).
 
             # Auto-reset daily PnL at ET midnight
             global daily_pnl, trading_halted_today, _last_midnight_day

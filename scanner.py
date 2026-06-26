@@ -50,6 +50,8 @@ _last_stoch:  dict[str, tuple] = {}   # keyed symbol -> (stoch_k, stoch_d) from 
 _last_stoch_fast: dict[str, tuple] = {}   # keyed symbol -> (stoch_k_fast, stoch_d_fast) 8,3,3
 _adverse_cluster: dict = {"long": [], "short": []}  # rolling adverse exit timestamps per direction
 _adverse_cooldown_until: dict = {"long": None, "short": None}  # graduated adverse cooldown expiry per direction
+_btc_flash_block_until: dict = {"long": None}                  # expiry for BTC 1m flash crash LONG block
+_flash_closed: set = set()                                      # trade keys already force-closed this flash event
 _cooldowns:   dict[str, float] = {}   # keyed "BTCSHORT" / "BTCLONG" -> expiry ts
 _scan_count:  int              = 0
 _stale_prices: set[str]        = set()  # symbols with 5+ consecutive missing prices
@@ -436,6 +438,9 @@ async def run_full_scan(client, market_health: Optional[dict] = None) -> list[di
             _min_sl_dist = price * (_min_sl_pct + _sess_buf)
             sl_dist      = max(_sl_atr, _min_sl_dist)
 
+            if (_btc_flash_block_until.get("long") and
+                    _now_utc < _btc_flash_block_until["long"]):
+                _regime_block_long = True
             # -- Score both directions -----------------------------------------
             _sym_base = symbol.replace("_USDT", "")
             _pair_corr = BTC_CORRELATION.get(_sym_base, 0.75)
@@ -458,6 +463,31 @@ async def run_full_scan(client, market_health: Optional[dict] = None) -> list[di
                 log.info(f"[FAST_STOCH_BLOCK] BTC fast K-D={_btc_fast_margin:.1f} -> SHORT entries blocked")
                 asyncio.create_task(_log_gate("MEXC", "BTC_USDT", "FAST_STOCH_BLOCK", "SHORT",
                     f"BTC fast K-D={_btc_fast_margin:.1f}"))
+            # -- Component A2: BTC 1m flash crash detector -------------------
+            _flash_thresholds = {"ASIA": 0.0030, "EU": 0.0055, "US": 0.0050}
+            _cur_session  = get_session_name()
+            _flash_thresh = _flash_thresholds.get(_cur_session, 0.0050)
+            try:
+                _btc_sym = "BTC_USDT"
+                _btc_1m = await client.get_candles(_btc_sym, "1m", 3)
+                if _btc_1m and len(_btc_1m) >= 2:
+                    _lc = _btc_1m[-2]
+                    _body_pct = abs(
+                        float(_lc["close"]) - float(_lc["open"])
+                    ) / float(_lc["open"])
+                    if (_body_pct >= _flash_thresh and
+                            float(_lc["close"]) < float(_lc["open"])):
+                        _btc_flash_block_until["long"] = (
+                            datetime.now(timezone.utc) + timedelta(minutes=5))
+                        _flash_closed.clear()
+                        _regime_block_long = True
+                        asyncio.create_task(_log_gate(
+                            "MEXC", _btc_sym, "BTC_FLASH_BLOCK", "LONG",
+                            f"1m body={_body_pct*100:.2f}% "
+                            f">= {_flash_thresh*100:.2f}% "
+                            f"session={_cur_session} LONGs blocked 5min"))
+            except Exception as _fe:
+                log.warning(f"[BTC_FLASH] candle error: {_fe}")
             # -- Component B: Adverse cluster directional halt ---------------
             if len(_adverse_cluster.get("long",  [])) >= 3: _regime_block_long  = True
             if len(_adverse_cluster.get("short", [])) >= 3: _regime_block_short = True

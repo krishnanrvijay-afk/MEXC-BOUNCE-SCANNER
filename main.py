@@ -95,6 +95,7 @@ circuit_breaker_active: bool  = False
 daily_pnl:              float = 0.0
 trading_halted_today:   bool  = False
 _last_midnight_day:     int   = datetime.now(ET).day
+_btc_flash_tg_expiry_sent = [None]  # mutable: last flash expiry for which TG was sent
 
 
 # -- App state -----------------------------------------------------------------
@@ -1633,6 +1634,34 @@ async def _exit_monitor_loop():
     """Runs every PRICE_INTERVAL_SECONDS. Checks every open trade against SL/TP."""
     while True:
         try:
+            # -- BTC flash: force-close open LONGs -------------------------
+            _fbu = _scanner_mod._btc_flash_block_until.get("long")
+            if _fbu and datetime.now(timezone.utc) < _fbu:
+                if _fbu != _btc_flash_tg_expiry_sent[0]:
+                    _btc_flash_tg_expiry_sent[0] = _fbu
+                    _flash_msg = (
+                        "BTC FLASH CRASH DETECTED\n"
+                        f"Session: {get_session_name()}\n"
+                        "ALL LONG ENTRIES BLOCKED 5 MINUTES\n"
+                        "OPEN LONGS BEING FORCE-CLOSED")
+                    if TELEGRAM_ENABLED:
+                        threading.Thread(
+                            target=lambda m=_flash_msg: _tg_post(m),
+                            daemon=True).start()
+                for _fkey, _ftrade in list(app_state.open_trades.items()):
+                    if (_ftrade.get("direction") == "LONG"
+                            and _fkey not in _scanner_mod._flash_closed):
+                        _fsym = _ftrade.get("symbol", "")
+                        _fpx  = app_state.prices.get(_fsym)
+                        if _fpx:
+                            print(f"[BTC_FLASH_CLOSE] force-closing LONG "
+                                  f"{_fsym} @ {_fpx}")
+                            _scanner_mod._flash_closed.add(_fkey)
+                            _do_close_trade(_fkey, _ftrade, _fpx,
+                                            "BTC_FLASH_CLOSE")
+            elif not _fbu:
+                _scanner_mod._flash_closed.clear()
+                _btc_flash_tg_expiry_sent[0] = None
             for key, trade in list(app_state.open_trades.items()):
                 sym       = trade["symbol"]
                 direction = trade["direction"]
@@ -2103,7 +2132,12 @@ async def index(request: Request):
 
 @app.get("/api/state")
 async def get_state():
-    return app_state.serialise()
+    _state = app_state.serialise()
+    _flash_exp = _scanner_mod._btc_flash_block_until.get("long")
+    _flash_active = bool(_flash_exp) and datetime.now(timezone.utc) < _flash_exp
+    _state["btc_flash_active"]  = _flash_active
+    _state["btc_flash_expires"] = _flash_exp.isoformat() if _flash_active else None
+    return _state
 
 
 @app.get("/api/account")

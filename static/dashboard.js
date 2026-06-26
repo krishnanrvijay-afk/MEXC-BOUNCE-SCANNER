@@ -572,24 +572,26 @@ function setBannerTF(tf) {
   function _getBtcRegime() {
     const btc = (STATE?.pair_states || []).find(p => p.symbol === 'BTC_USDT');
     if (!btc) return null;
-    const j1h = btc.j1h, j15m = btc.j15m, stochK = btc.stoch_k, stochD = btc.stoch_d;
-    if (j1h == null) return null;
+    const j1h   = Math.min(100, Math.max(0, btc.j1h||0));
+    const j15m  = Math.min(100, Math.max(0, btc.j15m||0));
+    const stochK = Math.min(100, Math.max(0, btc.stoch_k||0));
+    const stochD = Math.min(100, Math.max(0, btc.stoch_d||0));
     let state, cls, color, label, narrative;
     if (j1h < 20) {
-      state='CONFIRMED_LONG'; cls='long'; color='#00e676'; label='LONG SAFE ZONE';
-      narrative='BTC is deeply oversold on the hourly. Longs have a green light from the regime.';
+      state='CONFIRMED_LONG'; cls='long'; color='#00e676'; label=' LONG SAFE ZONE';
+      narrative='BTC is deeply oversold  longs have a green light from the regime.';
     } else if (j1h < 40) {
-      state='CAUTION_LONG'; cls='caution'; color='#ffb300'; label='CAUTION ZONE';
-      narrative='BTC hourly is between oversold and neutral. Bounce possible but not confirmed. Enter longs at your discretion.';
+      state='CAUTION_LONG'; cls='caution'; color='#ffb300'; label=' CAUTION  YOUR CALL';
+      narrative='Bounce possible but not confirmed. Enter longs at your discretion.';
     } else if (j1h <= 60) {
-      state='STOP'; cls='stop'; color='#ff4646'; label='STOP ZONE';
-      narrative='BTC is in no-mans land, not oversold or overbought enough to trade confidently either direction.';
+      state='STOP'; cls='stop'; color='#ff4646'; label=' STOP ZONE  NO ENTRY';
+      narrative='BTC in no-mans land  no edge either direction. Wait.';
     } else if (j1h < 80) {
-      state='CAUTION_SHORT'; cls='caution'; color='#ffb300'; label='CAUTION ZONE';
-      narrative='BTC hourly is between neutral and overbought. Enter shorts at your discretion.';
+      state='CAUTION_SHORT'; cls='caution'; color='#ffb300'; label=' CAUTION  YOUR CALL';
+      narrative='Approaching short safe zone. Wait for J1H above 80 for conviction.';
     } else {
-      state='CONFIRMED_SHORT'; cls='short'; color='#ff4646'; label='SHORT SAFE ZONE';
-      narrative='BTC is deeply overbought on the hourly. Shorts have a green light from the regime.';
+      state='CONFIRMED_SHORT'; cls='short'; color='#ff4646'; label=' SHORT SAFE ZONE';
+      narrative='BTC is deeply overbought  shorts have a green light from the regime.';
     }
     return {state, cls, color, label, narrative, j1h, j15m, stochK, stochD};
   }
@@ -2090,7 +2092,7 @@ function _ovRulerHtml(d, dir) {
     const rCol = (d.trend === 'Strong Bull' || d.trend === 'Bullish') ? '#00e676'
                : (d.trend === 'Strong Bear' || d.trend === 'Bearish') ? '#ff3d57'
                :                                                          '#aaa';
-    return `<button class="pov-btn pov-btn-mexc" onclick="_ovOpen('${d.symbol}','${dir}','MEXC',${lev})" style="border-color:${rCol};color:${rCol};font-weight:700">OPEN HL ${lev}x</button>`;
+    return `<button class="pov-btn pov-btn-mexc" onclick="_ovOpen('${d.symbol}','${dir}','MEXC',${lev})" style="border-color:${rCol};color:${rCol};font-weight:700">OPEN MEXC ${lev}x</button>`;
   }
   const wCol = (d.trend === 'Strong Bull' || d.trend === 'Bullish') ? '#00e676'
              : (d.trend === 'Strong Bear' || d.trend === 'Bearish') ? '#ff3d57'

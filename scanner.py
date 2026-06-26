@@ -439,9 +439,6 @@ async def run_full_scan(client, market_health: Optional[dict] = None) -> list[di
             _min_sl_dist = price * (_min_sl_pct + _sess_buf)
             sl_dist      = max(_sl_atr, _min_sl_dist)
 
-            if (_btc_flash_block_until.get("long") and
-                    _now_utc < _btc_flash_block_until["long"]):
-                _regime_block_long = True
             # -- Score both directions -----------------------------------------
             _sym_base = symbol.replace("_USDT", "")
             _pair_corr = BTC_CORRELATION.get(_sym_base, 0.75)

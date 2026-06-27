@@ -2203,6 +2203,11 @@ async def get_state():
     _flash_active = bool(_flash_exp) and datetime.now(timezone.utc) < _flash_exp
     _state["btc_flash_active"]  = _flash_active
     _state["btc_flash_expires"] = _flash_exp.isoformat() if _flash_active else None
+    _state["btc_j1h"]            = _scanner_mod._btc_j1h
+    _state["regime_block_long"]  = _scanner_mod._btc_j1h > _scanner_mod.BTC_J1H_LONG_MAX
+    _state["regime_block_short"] = _scanner_mod._btc_j1h >= _scanner_mod.BTC_J1H_SHORT_MAX
+    _state["btc_j1h_long_max"]   = _scanner_mod.BTC_J1H_LONG_MAX
+    _state["btc_j1h_short_max"]  = _scanner_mod.BTC_J1H_SHORT_MAX
     return _state
 
 

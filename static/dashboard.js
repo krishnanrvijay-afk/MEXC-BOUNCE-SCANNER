@@ -991,7 +991,7 @@ function buildPosCard(t, prices, pairStates) {
       <span style="color:#ffaa00;font-size:13px;line-height:1"></span>
       <span class="pcv2-sig">Bounce</span>
       <span style="font-size:11px;font-weight:700;color:${dirCol}">${cond}</span>
-      ${score ? `<span class="pcv2-sc">${score}pts</span>` : ''}
+      ${score >= 4 ? `<span class="pcv2-sc" title="${score}pts" style="letter-spacing:2px;font-size:14px;color:${score>=10?'#f59e0b':score>=8?'#22c55e':score>=6?'#a855f7':'#94a3b8'}">${'●'.repeat(Math.min(Math.floor((score-2)/2),4))}${'○'.repeat(4-Math.min(Math.floor((score-2)/2),4))}</span>` : ''}
     </div>
     <span class="pcv2-timer" id="${tid}">00:00:00</span>
   </div>
@@ -2736,118 +2736,310 @@ function _mexcAccRender() {
 // -- Settings Overlay -------------------------------------------------------
 
 function openSettingsSheet() {
-  var bd = document.getElementById('cfg-backdrop');
-  var sh = document.getElementById('cfg-sheet');
-  bd.style.display = 'flex';
-  requestAnimationFrame(function() { sh.style.transform = 'translateY(0)'; });
+  var bd = document.getElementById('hl-cfg-backdrop');
+  if (!bd) return;
+  bd.classList.add('open');
   cfgFetch();
 }
 
 function closeSettingsSheet() {
-  var sh = document.getElementById('cfg-sheet');
-  sh.style.transform = 'translateY(100%)';
-  setTimeout(function() {
-    document.getElementById('cfg-backdrop').style.display = 'none';
-  }, 300);
+  var bd = document.getElementById('hl-cfg-backdrop');
+  if (bd) bd.classList.remove('open');
 }
 
 async function cfgFetch() {
   try {
-    var s = await fetch('/api/settings').then(function(r) { return r.json(); });
-    document.getElementById('cfg-paper').checked    = s.paper_mode;
+    var r = await fetch('/api/settings');
+    if (!r.ok) return;
+    var d = await r.json();
+    document.getElementById(
+      'cfg-paper').checked =
+      !!d.paper_mode;
+    document.getElementById(
+      'cfg-tg').checked =
+      !!d.telegram_enabled;
+    document.getElementById(
+      'cfg-depth').value =
+      d.depth_gate_pct ?? 55;
+    document.getElementById(
+      'cfg-adx-min').value =
+      d.adx_min_long ?? 20;
+    document.getElementById(
+      'cfg-j15m-os').value =
+      d.j15m_short_gate ?? 80;
+    document.getElementById(
+      'cfg-j15m-ob').value =
+      d.j15m_long_gate ?? 20;
+    document.getElementById(
+      'cfg-j1h-os').value =
+      d.j1h_short_min ?? 60;
+    document.getElementById(
+      'cfg-j1h-os-max').value =
+      d.j1h_short_max ?? 89;
+    document.getElementById(
+      'cfg-j1h-ob-max').value =
+      d.j1h_long_max ?? 59;
+    document.getElementById(
+      'cfg-atr-sl').value =
+      d.atr_sl_multiplier ?? 1.0;
+    document.getElementById(
+      'cfg-tp1-pct').value =
+      Math.round(
+        (d.tp1_close_pct ?? 0.7) * 100);
+    document.getElementById(
+      'cfg-tp2-r').value =
+      d.tp2_r ?? 1.2;
+    document.getElementById(
+      'cfg-margin').value =
+      d.margin_per_trade ?? 2000;
+    document.getElementById(
+      'cfg-loss-limit').value =
+      Math.abs(d.daily_loss_limit ?? 800);
+    document.getElementById(
+      'cfg-circuit').value =
+      d.consecutive_loss_stop ?? 3;
     cfgUpdatePaperLabel();
-    document.getElementById('cfg-tg').checked       = s.telegram_enabled;
     cfgUpdateTgLabel();
-    document.getElementById('cfg-cooldown').value   = s.cooldown_seconds;
-    document.getElementById('cfg-depth').value      = s.depth_gate_pct;
-    document.getElementById('cfg-adx').value        = s.adx_fade_max;
-    document.getElementById('cfg-j15m-os').value    = s.j15m_short_gate;
-    document.getElementById('cfg-j15m-ob').value    = s.j15m_long_gate;
-    document.getElementById('cfg-j1h-os').value     = s.j1h_short_min;
-    document.getElementById('cfg-margin').value     = s.margin_per_trade;
-    document.getElementById('cfg-dailyloss').value  = Math.abs(s.daily_loss_limit);
-    document.getElementById('cfg-cb').value         = s.consecutive_loss_stop;
-  } catch(e) { console.error('cfgFetch error', e); }
+    cfgFetchIdentity();
+  } catch(e) {
+    console.warn('cfgFetch error', e);
+  }
 }
 
 function cfgUpdatePaperLabel() {
-  var on = document.getElementById('cfg-paper').checked;
-  var el = document.getElementById('cfg-paper-label');
-  el.textContent = on ? 'PAPER \u2014 no real funds' : 'LIVE \u2014 real funds at risk';
-  el.style.color = on ? '#00e676' : '#ff4444';
+  var on  = document.getElementById('cfg-paper').checked;
+  var lbl = document.getElementById('cfg-paper-lbl');
+  var sub = document.getElementById('cfg-paper-sub');
+  if (lbl) { lbl.style.color = on ? '#22c55e' : '#ef4444'; lbl.textContent = on ? 'PAPER MODE' : 'LIVE MODE'; }
+  if (sub) { sub.style.color = on ? '#22c55e' : '#ef4444'; sub.textContent = on ? 'PAPER — no real funds' : 'LIVE — real funds at risk'; }
 }
 
 function cfgUpdateTgLabel() {
-  var on = document.getElementById('cfg-tg').checked;
-  var el = document.getElementById('cfg-tg-label');
-  el.textContent = on ? 'ON' : 'OFF';
-  el.style.color = on ? '#00e676' : '#ff4444';
+  var on  = document.getElementById('cfg-tg').checked;
+  var sub = document.getElementById('cfg-tg-sub');
+  if (sub) { sub.style.color = on ? '#22c55e' : '#ef4444'; sub.textContent = on ? 'ON' : 'OFF'; }
 }
 
 async function cfgSave() {
-  var daily = parseFloat(document.getElementById('cfg-dailyloss').value);
+  var btn = document.getElementById(
+    'cfg-save-btn');
   var body = {
-    paper_mode:            document.getElementById('cfg-paper').checked,
-    telegram_enabled:      document.getElementById('cfg-tg').checked,
-    cooldown_seconds:      parseFloat(document.getElementById('cfg-cooldown').value),
-    depth_gate_pct:        parseFloat(document.getElementById('cfg-depth').value),
-    adx_fade_max:          parseFloat(document.getElementById('cfg-adx').value),
-    j15m_short_gate:       parseFloat(document.getElementById('cfg-j15m-os').value),
-    j15m_long_gate:        parseFloat(document.getElementById('cfg-j15m-ob').value),
-    j1h_short_min:         parseFloat(document.getElementById('cfg-j1h-os').value),
-    margin_per_trade:      parseFloat(document.getElementById('cfg-margin').value),
-    daily_loss_limit:      -(Math.abs(daily)),
-    consecutive_loss_stop: parseInt(document.getElementById('cfg-cb').value, 10),
+    paper_mode:
+      document.getElementById(
+      'cfg-paper').checked,
+    telegram_enabled:
+      document.getElementById(
+      'cfg-tg').checked,
+    depth_gate_pct: Number(
+      document.getElementById(
+      'cfg-depth').value),
+    adx_min_long: Number(
+      document.getElementById(
+      'cfg-adx-min').value),
+    j15m_short_gate: Number(
+      document.getElementById(
+      'cfg-j15m-os').value),
+    j15m_long_gate: Number(
+      document.getElementById(
+      'cfg-j15m-ob').value),
+    j1h_short_min: Number(
+      document.getElementById(
+      'cfg-j1h-os').value),
+    j1h_short_max: Number(
+      document.getElementById(
+      'cfg-j1h-os-max').value),
+    j1h_long_max: Number(
+      document.getElementById(
+      'cfg-j1h-ob-max').value),
+    atr_sl_multiplier: Number(
+      document.getElementById(
+      'cfg-atr-sl').value),
+    tp1_close_pct:
+      Number(document.getElementById(
+      'cfg-tp1-pct').value) / 100,
+    tp2_r: Number(
+      document.getElementById(
+      'cfg-tp2-r').value),
+    margin_per_trade: Number(
+      document.getElementById(
+      'cfg-margin').value),
+    daily_loss_limit: -Math.abs(Number(
+      document.getElementById(
+      'cfg-loss-limit').value)),
+    consecutive_loss_stop: Number(
+      document.getElementById(
+      'cfg-circuit').value),
   };
   try {
-    await fetch('/api/settings', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    var btn = document.getElementById('cfg-save-btn');
-    if (btn) {
-      btn.textContent = 'SAVED';
-      setTimeout(function() { btn.textContent = 'SAVE SETTINGS'; }, 1500);
+    var r = await fetch('/api/settings',
+      { method: 'POST',
+        headers: {
+          'Content-Type':
+          'application/json'},
+        body: JSON.stringify(body) });
+    if (!r.ok) {
+      alert('Save failed: ' + r.status);
+      return;
     }
-  } catch(e) { console.error('cfgSave error', e); }
+    var orig = btn.textContent;
+    btn.textContent = 'SAVED ✓';
+    btn.style.background = '#22c55e';
+    setTimeout(function() {
+      btn.textContent = orig;
+      btn.style.background = '';
+    }, 1500);
+  } catch(e) {
+    alert('Request failed: ' + e);
+  }
 }
 
 var _cfgResetTimer = null;
+var _cfgResetArmed = false;
+var _cfgResetTimer = null;
+
 function cfgResetArm() {
   var btn = document.getElementById('cfg-reset-btn');
-  if (_cfgResetTimer) {
-    clearTimeout(_cfgResetTimer);
-    _cfgResetTimer = null;
-    btn.textContent = 'RESETTING...';
-    fetch('/api/reset-session', { method: 'POST' })
-      .then(function() {
-        btn.textContent = 'RESET COMPLETE';
-        btn.style.background = 'transparent';
-        btn.style.color = '#ff4444';
-        btn.style.borderColor = '#ff4444';
-        setTimeout(function() { btn.textContent = 'RESET SESSION'; }, 2000);
-      })
-      .catch(function(e) {
-        console.error('reset error', e);
-        btn.textContent = 'RESET SESSION';
-        btn.style.background = 'transparent';
-        btn.style.color = '#ff4444';
-        btn.style.borderColor = '#ff4444';
-      });
-  } else {
+  if (!btn) return;
+  if (!_cfgResetArmed) {
+    _cfgResetArmed = true;
+    btn.classList.add('armed');
     btn.textContent = 'TAP TO CONFIRM';
-    btn.style.background = '#ff4444';
-    btn.style.color = '#000';
-    btn.style.borderColor = '#ff4444';
     _cfgResetTimer = setTimeout(function() {
+      _cfgResetArmed = false;
+      btn.classList.remove('armed');
       btn.textContent = 'RESET SESSION';
-      btn.style.background = 'transparent';
-      btn.style.color = '#ff4444';
-      btn.style.borderColor = '#ff4444';
-      _cfgResetTimer = null;
     }, 3000);
+  } else {
+    clearTimeout(_cfgResetTimer);
+    _cfgResetArmed = false;
+    _cfgDoReset(btn);
   }
+}
+
+async function _cfgDoReset(btn) {
+  try {
+    var r = await fetch('/api/reset-session', { method: 'POST' });
+    btn.classList.remove('armed');
+    if (r.ok) {
+      btn.classList.add('done');
+      btn.textContent = 'RESET COMPLETE';
+      setTimeout(function() { btn.classList.remove('done'); btn.textContent = 'RESET SESSION'; }, 2000);
+      fetchState();
+    } else {
+      btn.textContent = 'RESET SESSION';
+      alert('Reset failed');
+    }
+  } catch(e) { btn.textContent = 'RESET SESSION'; alert('Request failed'); }
+}
+
+async function cfgFetchIdentity() {
+  var body = document.getElementById('cfg-identity-body');
+  if (!body) return;
+  try {
+    var r = await fetch('/api/bot-identity');
+    if (!r.ok) return;
+    var d = await r.json();
+    cfgRenderIdentity(d);
+  } catch(e) { console.warn('cfgFetchIdentity error', e); }
+}
+
+function _cfgEsc(s) {
+  return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function cfgRenderIdentity(d) {
+  var body = document.getElementById('cfg-identity-body');
+  if (!body) return;
+  var name = d.bot_instance_id || '';
+  var committed = !!d.committed;
+  if (!committed) {
+    body.innerHTML =
+      '<div class="hl-cfg-manifest-row" style="border-bottom:none;flex-direction:column;align-items:flex-start;gap:10px">' +
+        '<span class="hl-cfg-manifest-lbl" style="color:#fff;font-weight:700">INSTANCE NAME</span>' +
+        '<div style="display:flex;gap:8px;width:100%;align-items:center">' +
+          '<input id="cfg-bot-name-inp" type="text" value="' + _cfgEsc(name) + '" ' +
+            'style="flex:1;background:#0d0d0d;border:1px solid #2a2a2a;border-radius:6px;' +
+            'padding:8px 10px;font-family:JetBrains Mono,monospace;font-size:17px;color:#f97316;outline:none" ' +
+            'placeholder="e.g. mx-main">' +
+          '<button onclick="cfgSetBotName()" ' +
+            'style="padding:8px 12px;background:#f97316;border:none;border-radius:6px;' +
+            'font-family:JetBrains Mono,monospace;font-size:14px;font-weight:800;color:#000;' +
+            'cursor:pointer;white-space:nowrap;letter-spacing:0.08em">' +
+            'SET BOT NAME</button>' +
+        '</div>' +
+        '<div style="font-family:JetBrains Mono,monospace;font-size:12px;color:#fff;font-weight:600;line-height:1.6">' +
+          'Auto-derived from Railway env. Set a name to lock this instance and enable cross-process duplicate protection.' +
+        '</div>' +
+      '</div>';
+  } else {
+    body.innerHTML =
+      '<div class="hl-cfg-manifest-row" style="border-bottom:none;flex-direction:column;align-items:flex-start;gap:10px">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;width:100%">' +
+          '<span class="hl-cfg-manifest-lbl" style="color:#fff;font-weight:700">INSTANCE NAME</span>' +
+          '<span style="font-family:Bebas Neue,sans-serif;font-size:30px;color:#f97316">' + _cfgEsc(name) + '</span>' +
+        '</div>' +
+        '<button id="cfg-bot-change-btn" onclick="cfgIdentityArm()" ' +
+          'style="width:100%;padding:10px;background:transparent;border:1px solid #f97316;border-radius:6px;' +
+          'font-family:JetBrains Mono,monospace;font-size:15px;font-weight:700;color:#f97316;' +
+          'cursor:pointer;letter-spacing:0.08em;transition:all 0.2s">' +
+          'CHANGE BOT NAME</button>' +
+        '<div id="cfg-bot-change-form" style="display:none;flex-direction:column;gap:8px;width:100%">' +
+          '<input id="cfg-bot-name-inp" type="text" value="' + _cfgEsc(name) + '" ' +
+            'style="width:100%;box-sizing:border-box;background:#0d0d0d;border:1px solid #2a2a2a;border-radius:6px;' +
+            'padding:8px 10px;font-family:JetBrains Mono,monospace;font-size:17px;color:#f97316;outline:none">' +
+          '<button onclick="cfgSetBotName()" ' +
+            'style="width:100%;padding:10px;background:#f97316;border:none;border-radius:6px;' +
+            'font-family:JetBrains Mono,monospace;font-size:15px;font-weight:800;color:#000;' +
+            'cursor:pointer;letter-spacing:0.08em">SAVE</button>' +
+        '</div>' +
+        '<div style="font-family:JetBrains Mono,monospace;font-size:12px;color:#fff;font-weight:600;line-height:1.6">' +
+          'Committed to Supabase. All processes sharing this Railway service will use this name.' +
+        '</div>' +
+      '</div>';
+  }
+}
+
+var _cfgIdentityArmed = false;
+var _cfgIdentityTimer = null;
+
+function cfgIdentityArm() {
+  var btn = document.getElementById('cfg-bot-change-btn');
+  if (!btn) return;
+  if (!_cfgIdentityArmed) {
+    _cfgIdentityArmed = true;
+    btn.style.background = '#f97316';
+    btn.style.color = '#000';
+    btn.textContent = 'TAP TO CONFIRM';
+    _cfgIdentityTimer = setTimeout(function() {
+      _cfgIdentityArmed = false;
+      btn.style.background = 'transparent';
+      btn.style.color = '#f97316';
+      btn.textContent = 'CHANGE BOT NAME';
+    }, 3000);
+  } else {
+    clearTimeout(_cfgIdentityTimer);
+    _cfgIdentityArmed = false;
+    btn.style.display = 'none';
+    var form = document.getElementById('cfg-bot-change-form');
+    if (form) form.style.display = 'flex';
+  }
+}
+
+async function cfgSetBotName() {
+  var inp = document.getElementById('cfg-bot-name-inp');
+  if (!inp) return;
+  var name = inp.value.trim();
+  if (!name) { alert('Bot name cannot be empty'); return; }
+  if (name.indexOf(':') !== -1) { alert('Bot name must not contain ":"'); return; }
+  try {
+    var r = await fetch('/api/bot-identity/set', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ name: name }),
+    });
+    var d = await r.json();
+    if (!r.ok) { alert('Failed: ' + (d.detail || r.status)); return; }
+    cfgRenderIdentity(d);
+  } catch(e) { alert('Request failed: ' + e); }
 }
 
 // -- OPEN LIVE OVERLAY -------------------------------------------------------
@@ -2929,7 +3121,7 @@ function _ltRenderBrief(b) {
   var rows = [
     ["ADX 1H",  (ad.adx1h  || 0).toFixed(1), (pairState.adx1h  || 0).toFixed(1)],
     ["J 15M",   (ad.j15m   || 0).toFixed(1), (pairState.j15m   || 0).toFixed(1)],
-    ["J 1H",    (ad.j1h    || 0).toFixed(1), (pairState.j15m   || 0).toFixed(1)],
+      ['J 1H',    (ad.j1h    || 0).toFixed(1), (pairState.j1h    || 0).toFixed(1)],
     ["STOCH K", (ad.stoch_k|| 0).toFixed(1), (pairState.stoch_k|| 0).toFixed(1)],
     ["STOCH D", (ad.stoch_d|| 0).toFixed(1), (pairState.stoch_d|| 0).toFixed(1)],
   ];

@@ -802,24 +802,52 @@
 </div>
 <style>
 /* cfg overlay */
-#cfg-backdrop{position:fixed;inset:0;background:rgba(0,0,0,0.65);backdrop-filter:blur(4px);z-index:9000;align-items:flex-end;justify-content:center}
-.cfg-pill{position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background:#222;border-radius:24px;transition:background 0.2s}
-.cfg-pill::before{position:absolute;content:"";height:18px;width:18px;left:3px;bottom:3px;background:#555;border-radius:50%;transition:transform 0.2s,background 0.2s}
-input:checked+.cfg-pill{background:#f97316}
-input:checked+.cfg-pill::before{transform:translateX(20px);background:#fff}
-.cfg-row{display:flex;align-items:center;margin-bottom:8px;gap:6px}
-.cfg-lbl{font-size:10px;font-weight:700;color:#ccc;letter-spacing:0.04em;white-space:nowrap;flex-shrink:0}
-.cfg-dots{flex:1;height:0;border-bottom:1px dashed #2a2a2a;min-width:8px}
-.cfg-num{background:#1a1a1a;border:1px solid #2a2a2a;border-radius:4px;color:#f97316;font-family:'Bebas Neue',sans-serif;font-size:18px;width:72px;text-align:right;padding:3px 6px;-moz-appearance:textfield}
-.cfg-num::-webkit-outer-spin-button,.cfg-num::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
-.cfg-unit{font-size:9px;font-weight:700;color:#555;white-space:nowrap;flex-shrink:0;min-width:28px}
-.cfg-pair-row{justify-content:space-between;background:#161618;border-radius:6px;padding:6px 8px;flex:1;margin-bottom:0}
-.cfg-pair-row .cfg-lbl{color:#888;font-size:9px}
-.cfg-pair-row .cfg-num{width:52px;font-size:16px}
-.cfg-tear{position:relative;border:none;border-top:2px dashed #2a2a2a;margin:14px -20px;overflow:visible}
-.cfg-tear::before,.cfg-tear::after{content:'';position:absolute;top:50%;width:16px;height:16px;background:#080808;border:2px dashed #2a2a2a;border-radius:50%}
-.cfg-tear::before{left:0;transform:translate(-50%,-50%)}
-.cfg-tear::after{right:0;transform:translate(50%,-50%)}
+  #hl-cfg-backdrop{position:fixed;inset:0;background:rgba(0,0,0,0.72);backdrop-filter:blur(6px);z-index:10000;display:none;align-items:flex-end;justify-content:center}
+  #hl-cfg-backdrop.open{display:flex}
+  #hl-cfg-sheet{background:#111113;border-top:2px solid #f97316;border-radius:14px 14px 0 0;width:100%;max-width:430px;max-height:92vh;overflow-y:auto;padding:0 0 32px;transform:translateY(100%);transition:transform 0.32s cubic-bezier(0.32,0.72,0,1)}
+  #hl-cfg-backdrop.open #hl-cfg-sheet{transform:translateY(0)}
+  #hl-cfg-sheet::-webkit-scrollbar{width:3px}
+  #hl-cfg-sheet::-webkit-scrollbar-track{background:#111}
+  #hl-cfg-sheet::-webkit-scrollbar-thumb{background:#f97316;border-radius:2px}
+  .hl-cfg-hd{padding:20px 20px 14px;display:flex;align-items:flex-start;justify-content:space-between}
+  .hl-cfg-title{font-family:'Bebas Neue',sans-serif;font-size:42px;letter-spacing:3px;color:#fff;line-height:1}
+  .hl-cfg-sub{font-family:'JetBrains Mono',monospace;font-size:14px;font-weight:700;color:#f97316;letter-spacing:0.14em;margin-top:3px}
+  .hl-cfg-close{background:none;border:none;cursor:pointer;font-family:'JetBrains Mono',monospace;font-size:27px;color:#fff;padding:0;line-height:1;margin-top:2px}
+  .hl-cfg-close:hover{color:#f97316}
+  .hl-cfg-sec-lbl{font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;color:#f97316;letter-spacing:0.18em;padding:0 20px 8px}
+  .hl-cfg-body{padding:0 20px}
+  .hl-cfg-row{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid #1a1a1a}
+  .hl-cfg-lbl{font-family:'JetBrains Mono',monospace;font-size:15px;font-weight:700;color:#fff;letter-spacing:0.06em}
+  .hl-cfg-sub-lbl{font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:600;color:#fff;margin-top:2px}
+  .hl-cfg-lbl-live{color:#ef4444}
+  .hl-cfg-lbl-paper{color:#22c55e}
+  .hl-cfg-switch{position:relative;width:42px;height:24px;flex-shrink:0}
+  .hl-cfg-switch input{opacity:0;width:0;height:0}
+  .hl-cfg-slider{position:absolute;cursor:pointer;inset:0;background:#2a2a2a;border-radius:24px;transition:background 0.2s}
+  .hl-cfg-slider:before{content:'';position:absolute;width:18px;height:18px;left:3px;bottom:3px;background:#fff;border-radius:50%;transition:transform 0.2s}
+  .hl-cfg-switch input:checked + .hl-cfg-slider{background:#f97316}
+  .hl-cfg-switch input:checked + .hl-cfg-slider:before{transform:translateX(18px)}
+  .hl-cfg-gate-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:8px 0}
+  .hl-cfg-gate-cell{background:#0d0d0d;border:1px solid #1e1e1e;border-radius:6px;padding:8px 10px}
+  .hl-cfg-gate-lbl{font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;color:#fff;letter-spacing:0.12em;margin-bottom:4px}
+  .hl-cfg-gate-inp{width:100%;background:none;border:none;font-family:'Bebas Neue',sans-serif;font-size:33px;color:#f97316;outline:none;padding:0}
+  .hl-cfg-manifest-row{display:flex;align-items:center;padding:9px 0;border-bottom:1px solid #0f0f0f}
+  .hl-cfg-manifest-lbl{font-family:'JetBrains Mono',monospace;font-size:14px;font-weight:700;color:#fff;letter-spacing:0.08em;white-space:nowrap}
+  .hl-cfg-manifest-dots{flex:1;border-bottom:1px dotted #2a2a2a;margin:0 8px;height:0;align-self:flex-end;margin-bottom:5px}
+  .hl-cfg-manifest-inp{font-family:'Bebas Neue',sans-serif;font-size:30px;color:#f97316;background:none;border:none;outline:none;text-align:right;width:80px}
+  .hl-cfg-manifest-unit{font-family:'JetBrains Mono',monospace;font-size:14px;font-weight:700;color:#fff;margin-left:4px;white-space:nowrap}
+  .hl-cfg-tear{display:flex;align-items:center;margin:16px 0;position:relative}
+  .hl-cfg-tear-circ{width:14px;height:14px;border-radius:50%;background:#0a0a0a;flex-shrink:0}
+  .hl-cfg-tear-line{flex:1;border-top:1px dashed #2a2a2a}
+  .hl-cfg-save-btn{display:block;width:calc(100% - 40px);margin:20px 20px 6px;padding:14px;background:#f97316;border:none;border-radius:8px;font-family:'JetBrains Mono',monospace;font-size:17px;font-weight:800;color:#000;letter-spacing:0.12em;cursor:pointer;transition:opacity 0.15s}
+  .hl-cfg-save-btn:hover{opacity:0.88}
+  .hl-cfg-caption{font-family:'JetBrains Mono',monospace;font-size:12px;color:#fff;font-weight:600;line-height:1.6;text-align:center;padding:0 20px 16px}
+  .hl-cfg-danger{margin:0 20px;border:1px solid rgba(239,68,68,0.4);border-radius:8px;padding:14px}
+  .hl-cfg-danger-hd{font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;color:#ef4444;letter-spacing:0.14em;margin-bottom:10px}
+  .hl-cfg-reset-btn{width:100%;padding:10px;background:transparent;border:1px solid #ef4444;border-radius:6px;font-family:'JetBrains Mono',monospace;font-size:15px;font-weight:700;color:#ef4444;cursor:pointer;letter-spacing:0.08em;transition:all 0.2s;margin-bottom:8px}
+  .hl-cfg-reset-btn.armed{background:#ef4444;color:#fff}
+  .hl-cfg-reset-btn.done{background:#166534;border-color:#166534;color:#fff}
+  .hl-cfg-danger-cap{font-family:'JetBrains Mono',monospace;font-size:12px;color:#fff;font-weight:600;line-height:1.6}
   /* ── LIVE TRADE OVERLAY ── */
     @keyframes liveDot { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
     @keyframes danger-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
@@ -858,59 +886,137 @@ input:checked+.cfg-pill::before{transform:translateX(20px);background:#fff}
     .ac-btn-live:disabled { opacity: 0.45; cursor: not-allowed; }
   </style>
 <!-- SETTINGS OVERLAY -->
-  <div id="cfg-backdrop" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.65);backdrop-filter:blur(4px);z-index:9000;align-items:flex-end;justify-content:center">
-    <div id="cfg-sheet" style="width:100%;max-width:430px;background:#111113;border-top:3px solid #f97316;border-radius:16px 16px 0 0;padding:24px 20px 32px;font-family:'JetBrains Mono',monospace;max-height:88vh;overflow-y:auto;transform:translateY(100%);transition:transform 0.3s cubic-bezier(0.4,0,0.2,1)">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px">
+  <div id="hl-cfg-backdrop" onclick="if(event.target===this)closeSettingsSheet()">
+    <div id="hl-cfg-sheet">
+      <div class="hl-cfg-hd">
         <div>
-          <div style="font-family:'Bebas Neue',sans-serif;font-size:28px;letter-spacing:0.08em;color:#fff;line-height:1">CONFIG MANIFEST</div>
-          <div style="font-size:9px;font-weight:700;color:#f97316;letter-spacing:0.12em;margin-top:3px">MEXC &middot; SESSION SETTINGS</div>
+          <div class="hl-cfg-title">CONFIG MANIFEST</div>
+          <div class="hl-cfg-sub">MEXC &#183; SESSION SETTINGS</div>
         </div>
-        <button onclick="closeSettingsSheet()" style="background:none;border:1px solid #333;border-radius:6px;color:#888;font-size:14px;width:28px;height:28px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;padding:0">&#x2715;</button>
+        <button class="hl-cfg-close" onclick="closeSettingsSheet()">&#x2715;</button>
       </div>
-      <div style="font-size:8px;font-weight:700;color:#f97316;letter-spacing:0.18em;margin-bottom:10px">MODE</div>
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
-        <div>
-          <div style="font-size:11px;font-weight:700;color:#fff;letter-spacing:0.04em">PAPER MODE</div>
-          <div id="cfg-paper-label" style="font-size:9px;font-weight:600;margin-top:2px"></div>
+      <div class="hl-cfg-sec-lbl">MODE</div>
+      <div class="hl-cfg-body">
+        <div class="hl-cfg-row">
+          <div>
+            <div class="hl-cfg-lbl" id="cfg-paper-lbl">PAPER MODE</div>
+            <div class="hl-cfg-sub-lbl" id="cfg-paper-sub">PAPER &#8212; no real funds</div>
+          </div>
+          <label class="hl-cfg-switch">
+            <input type="checkbox" id="cfg-paper" onchange="cfgUpdatePaperLabel()">
+            <span class="hl-cfg-slider"></span>
+          </label>
         </div>
-        <label style="position:relative;display:inline-block;width:44px;height:24px;flex-shrink:0">
-          <input type="checkbox" id="cfg-paper" style="opacity:0;width:0;height:0;position:absolute" onchange="cfgUpdatePaperLabel()">
-          <span class="cfg-pill"></span>
-        </label>
-      </div>
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
-        <div>
-          <div style="font-size:11px;font-weight:700;color:#fff;letter-spacing:0.04em">TELEGRAM ALERTS</div>
-          <div id="cfg-tg-label" style="font-size:9px;font-weight:600;margin-top:2px"></div>
+        <div class="hl-cfg-row" style="border-bottom:none">
+          <div>
+            <div class="hl-cfg-lbl" id="cfg-tg-lbl">TELEGRAM ALERTS</div>
+            <div class="hl-cfg-sub-lbl" id="cfg-tg-sub">OFF</div>
+          </div>
+          <label class="hl-cfg-switch">
+            <input type="checkbox" id="cfg-tg" onchange="cfgUpdateTgLabel()">
+            <span class="hl-cfg-slider"></span>
+          </label>
         </div>
-        <label style="position:relative;display:inline-block;width:44px;height:24px;flex-shrink:0">
-          <input type="checkbox" id="cfg-tg" style="opacity:0;width:0;height:0;position:absolute" onchange="cfgUpdateTgLabel()">
-          <span class="cfg-pill"></span>
-        </label>
       </div>
-      <div class="cfg-tear"></div>
-      <div style="font-size:8px;font-weight:700;color:#f97316;letter-spacing:0.18em;margin-bottom:10px;margin-top:16px">GATE THRESHOLDS</div>
-      <div class="cfg-row"><span class="cfg-lbl">COOLDOWN</span><span class="cfg-dots"></span><input class="cfg-num" id="cfg-cooldown" type="number" min="0" step="60"><span class="cfg-unit">sec</span></div>
-      <div class="cfg-row"><span class="cfg-lbl">DEPTH GATE</span><span class="cfg-dots"></span><input class="cfg-num" id="cfg-depth" type="number" min="0" max="100" step="1"><span class="cfg-unit">%</span></div>
-      <div class="cfg-row"><span class="cfg-lbl">ADX FADE MAX</span><span class="cfg-dots"></span><input class="cfg-num" id="cfg-adx" type="number" min="0" max="100" step="1"><span class="cfg-unit"></span></div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
-        <div class="cfg-row cfg-pair-row"><span class="cfg-lbl">J15M OS</span><input class="cfg-num" id="cfg-j15m-os" type="number" min="0" max="100" step="1"></div>
-        <div class="cfg-row cfg-pair-row"><span class="cfg-lbl">J15M OB</span><input class="cfg-num" id="cfg-j15m-ob" type="number" min="0" max="100" step="1"></div>
+      <div class="hl-cfg-tear"><div class="hl-cfg-tear-circ"></div><div class="hl-cfg-tear-line"></div><div class="hl-cfg-tear-circ"></div></div>
+      <div class="hl-cfg-sec-lbl">GATE THRESHOLDS</div>
+      <div class="hl-cfg-body">
+        <div class="hl-cfg-manifest-row">
+          <span class="hl-cfg-manifest-lbl">DEPTH GATE</span>
+          <div class="hl-cfg-manifest-dots"></div>
+          <input class="hl-cfg-manifest-inp" type="number" id="cfg-depth" min="0" max="100" step="1">
+          <span class="hl-cfg-manifest-unit">%</span>
+        </div>
+        <div class="hl-cfg-manifest-row">
+          <span class="hl-cfg-manifest-lbl">ADX MIN LONG</span>
+          <div class="hl-cfg-manifest-dots"></div>
+          <input class="hl-cfg-manifest-inp" type="number" id="cfg-adx-min" min="0" max="60" step="1">
+          <span class="hl-cfg-manifest-unit">ADX</span>
+        </div>
+        <div class="hl-cfg-gate-grid">
+          <div class="hl-cfg-gate-cell">
+            <div class="hl-cfg-gate-lbl">J15M &#183; OS</div>
+            <input class="hl-cfg-gate-inp" type="number" id="cfg-j15m-os" min="0" max="100">
+          </div>
+          <div class="hl-cfg-gate-cell">
+            <div class="hl-cfg-gate-lbl">J15M &#183; OB</div>
+            <input class="hl-cfg-gate-inp" type="number" id="cfg-j15m-ob" min="0" max="100">
+          </div>
+          <div class="hl-cfg-gate-cell">
+            <div class="hl-cfg-gate-lbl">J1H &#183; OS</div>
+            <input class="hl-cfg-gate-inp" type="number" id="cfg-j1h-os" min="0" max="100">
+          </div>
+        </div>
+        <div class="hl-cfg-manifest-row">
+          <span class="hl-cfg-manifest-lbl">J1H &#183; OS MAX</span>
+          <div class="hl-cfg-manifest-dots"></div>
+          <input class="hl-cfg-manifest-inp" type="number" id="cfg-j1h-os-max" min="0" max="100" step="1">
+          <span class="hl-cfg-manifest-unit"></span>
+        </div>
+        <div class="hl-cfg-manifest-row" style="border-bottom:none">
+          <span class="hl-cfg-manifest-lbl">J1H &#183; OB MAX</span>
+          <div class="hl-cfg-manifest-dots"></div>
+          <input class="hl-cfg-manifest-inp" type="number" id="cfg-j1h-ob-max" min="0" max="100" step="1">
+          <span class="hl-cfg-manifest-unit"></span>
+        </div>
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:4px">
-        <div class="cfg-row cfg-pair-row"><span class="cfg-lbl">J1H OS</span><input class="cfg-num" id="cfg-j1h-os" type="number" min="0" max="100" step="1"></div>
+      <div class="hl-cfg-tear"><div class="hl-cfg-tear-circ"></div><div class="hl-cfg-tear-line"></div><div class="hl-cfg-tear-circ"></div></div>
+      <div class="hl-cfg-sec-lbl">TRADE PARAMETERS</div>
+      <div class="hl-cfg-body">
+        <div class="hl-cfg-manifest-row">
+          <span class="hl-cfg-manifest-lbl">ATR SL MULTIPLIER</span>
+          <div class="hl-cfg-manifest-dots"></div>
+          <input class="hl-cfg-manifest-inp" type="number" id="cfg-atr-sl" min="0.1" max="3.0" step="0.1">
+          <span class="hl-cfg-manifest-unit"></span>
+        </div>
+        <div class="hl-cfg-manifest-row">
+          <span class="hl-cfg-manifest-lbl">TP1 CLOSE %</span>
+          <div class="hl-cfg-manifest-dots"></div>
+          <input class="hl-cfg-manifest-inp" type="number" id="cfg-tp1-pct" min="10" max="100" step="5">
+          <span class="hl-cfg-manifest-unit">%</span>
+        </div>
+        <div class="hl-cfg-manifest-row" style="border-bottom:none">
+          <span class="hl-cfg-manifest-lbl">TP2 R</span>
+          <div class="hl-cfg-manifest-dots"></div>
+          <input class="hl-cfg-manifest-inp" type="number" id="cfg-tp2-r" min="0.5" max="5.0" step="0.1">
+          <span class="hl-cfg-manifest-unit">R</span>
+        </div>
       </div>
-      <div class="cfg-tear"></div>
-      <div style="font-size:8px;font-weight:700;color:#f97316;letter-spacing:0.18em;margin-bottom:10px;margin-top:16px">RISK</div>
-      <div class="cfg-row"><span class="cfg-lbl">MARGIN / TRADE</span><span class="cfg-dots"></span><input class="cfg-num" id="cfg-margin" type="number" min="0" step="100"><span class="cfg-unit">$</span></div>
-      <div class="cfg-row"><span class="cfg-lbl">DAILY LOSS LIMIT</span><span class="cfg-dots"></span><input class="cfg-num" id="cfg-dailyloss" type="number" min="0" step="100"><span class="cfg-unit">$</span></div>
-      <div class="cfg-row"><span class="cfg-lbl">CIRCUIT BREAKER</span><span class="cfg-dots"></span><input class="cfg-num" id="cfg-cb" type="number" min="1" step="1"><span class="cfg-unit">losses</span></div>
-      <button id="cfg-save-btn" onclick="cfgSave()" style="width:100%;padding:13px;background:#f97316;color:#000;border:none;border-radius:8px;font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;letter-spacing:0.1em;cursor:pointer;margin-top:20px">SAVE SETTINGS</button>
-      <div style="font-size:8px;color:#555;text-align:center;margin-top:8px;line-height:1.5">Settings apply immediately and persist while this server instance stays up.<br>They reset to code defaults after a full redeploy.</div>
-      <div style="margin-top:20px;border:1px solid #7f1d1d;border-radius:8px;padding:14px">
-        <div style="font-size:8px;font-weight:700;color:#ff4444;letter-spacing:0.16em;margin-bottom:10px">DANGER ZONE</div>
-        <button id="cfg-reset-btn" onclick="cfgResetArm()" style="width:100%;padding:10px;background:transparent;border:1px solid #ff4444;border-radius:6px;color:#ff4444;font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;letter-spacing:0.06em;cursor:pointer;transition:all 0.2s">RESET SESSION</button>
-        <div style="font-size:8px;color:#666;margin-top:8px;line-height:1.5">Clears open positions, alerts, cooldowns, and scan history for a fresh start. This cannot be undone. Tap once to arm, tap again to confirm.</div>
+      <div class="hl-cfg-tear"><div class="hl-cfg-tear-circ"></div><div class="hl-cfg-tear-line"></div><div class="hl-cfg-tear-circ"></div></div>
+      <div class="hl-cfg-sec-lbl">RISK</div>
+      <div class="hl-cfg-body">
+        <div class="hl-cfg-manifest-row">
+          <span class="hl-cfg-manifest-lbl">MARGIN / TRADE</span>
+          <div class="hl-cfg-manifest-dots"></div>
+          <input class="hl-cfg-manifest-inp" type="number" id="cfg-margin" min="0" step="100">
+          <span class="hl-cfg-manifest-unit">$</span>
+        </div>
+        <div class="hl-cfg-manifest-row">
+          <span class="hl-cfg-manifest-lbl">DAILY LOSS LIMIT</span>
+          <div class="hl-cfg-manifest-dots"></div>
+          <input class="hl-cfg-manifest-inp" type="number" id="cfg-loss-limit" min="-99999" max="0" step="50">
+          <span class="hl-cfg-manifest-unit">$</span>
+        </div>
+        <div class="hl-cfg-manifest-row" style="border-bottom:none">
+          <span class="hl-cfg-manifest-lbl">CIRCUIT BREAKER</span>
+          <div class="hl-cfg-manifest-dots"></div>
+          <input class="hl-cfg-manifest-inp" type="number" id="cfg-circuit" min="1" max="20" step="1">
+          <span class="hl-cfg-manifest-unit">losses</span>
+        </div>
+      </div>
+      <button class="hl-cfg-save-btn" id="cfg-save-btn" onclick="cfgSave()">SAVE SETTINGS</button>
+      <div class="hl-cfg-caption">Settings apply immediately and persist while this server instance stays up.<br>They reset to code defaults after a full redeploy.</div>
+      <div class="hl-cfg-tear"><div class="hl-cfg-tear-circ"></div><div class="hl-cfg-tear-line"></div><div class="hl-cfg-tear-circ"></div></div>
+      <div class="hl-cfg-sec-lbl">BOT IDENTITY</div>
+      <div class="hl-cfg-body" id="cfg-identity-body">
+        <div class="hl-cfg-manifest-row" style="border-bottom:none">
+          <span class="hl-cfg-manifest-lbl">LOADING&hellip;</span>
+        </div>
+      </div>
+      <div class="hl-cfg-danger">
+        <div class="hl-cfg-danger-hd">&#9888; DANGER ZONE</div>
+        <button class="hl-cfg-reset-btn" id="cfg-reset-btn" onclick="cfgResetArm()">RESET SESSION</button>
+        <div class="hl-cfg-danger-cap">Clears open positions, alerts, cooldowns, and scan history for a fresh start. This cannot be undone. Tap once to arm, tap again to confirm.</div>
       </div>
     </div>
   </div>

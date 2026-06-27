@@ -262,6 +262,7 @@ def score_bounce_long(j15m, j1h, bid_pct, adx,
     tier, lev = _leverage_tier(adx)
     stoch_gate = stoch_k < 25 and stoch_k > stoch_d and stoch_k_prev <= stoch_d_prev
     if not (j15m < J15M_LONG_GATE and j1h >= J1H_LONG_MIN
+            and j1h < J1H_LONG_MAX
             and stoch_gate and bid_pct >= DEPTH_GATE_PCT and adx >= ADX_MIN_LONG):
         return 0, tier, lev
     score = 4

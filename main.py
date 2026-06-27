@@ -60,7 +60,7 @@ _session_sl_counts: dict[str, int]   = {}    # "SYMBOL_DIRECTION_SESSION" -> SL 
 _session_halted:    set[str]         = set() # "SYMBOL_DIRECTION_SESSION" halted for session
 _large_sl_cooldowns: dict[str, float] = {}   # "SYMBOLDIR" -> expiry ts for 90-min cooldowns
 _peak_shadow: dict = {}   # trade_key -> shadow tracking state (observation only)
-_sentinel_sweep: list = []   # deferred protective exits (PEAK_DECAY_20 / RUNNER_DECAY_10) â flushed once per scan cycle
+_sentinel_sweep: list = []   # deferred protective exits (PEAK_DECAY_20 / RUNNER_DECAY_10) Ã¢ÂÂ flushed once per scan cycle
 _adverse_shadow: dict = {}  # trade_key -> adverse-cut shadow state (observation only)
 _sign_shadow:   dict = {}  # trade_key -> PnL-sign transition history (observation only)
 _signal_shadow: dict = {}  # trade_key -> signal invalidation shadow state (observation only)
@@ -83,7 +83,7 @@ ADVERSE_CUT_USD: dict[str, float] = {
 }
 ADVERSE_CUT_DEFAULT_USD: float = 60.0
 
-# -- Bot identity âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+# -- Bot identity Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
 BOT_INSTANCE_ID: str          = "default"
 _BOT_IDENTITY_COMMITTED: bool = False
 _prev_session:      str              = ""
@@ -259,14 +259,14 @@ def _get_supabase() -> Optional[Client]:
 
 
 def _alert_save_failure(error_msg: str) -> None:
-    """Telegram alert on _save_state() failure â at most once per 5 min (cooldown)."""
+    """Telegram alert on _save_state() failure Ã¢ÂÂ at most once per 5 min (cooldown)."""
     global _last_save_fail_alert
     now = datetime.now(timezone.utc)
     if _last_save_fail_alert and (now - _last_save_fail_alert) < timedelta(minutes=5):
         return
     _last_save_fail_alert = now
     msg = (
-        "â ï¸ MEXC PERSIST FAILURE â _save_state() raised:\n"
+        "Ã¢ÂÂ Ã¯Â¸Â MEXC PERSIST FAILURE Ã¢ÂÂ _save_state() raised:\n"
         + error_msg
         + "\n\nCheck mexc_scanner_state immediately. State is NOT being saved."
     )
@@ -290,7 +290,6 @@ def _save_state():
             "consecutive_losses":     consecutive_losses,
             "circuit_breaker_active": circuit_breaker_active,
             "cooldowns":              dict(_scanner_mod._cooldowns),
-            "cooldown_seconds":       _scanner_mod.COOLDOWN_SECONDS,
             "peak_shadow":            dict(_peak_shadow),
             "adverse_shadow":         dict(_adverse_shadow),
             "signal_shadow":          dict(_signal_shadow),
@@ -407,19 +406,6 @@ def _load_state():
                 _signal_shadow[key] = sh
         print(f"[RESTORE] shadow dicts -- peak={len(_peak_shadow)} adverse={len(_adverse_shadow)}" + f" signal={len(_signal_shadow)}")
 
-        # -- Restore cooldowns (filter expired) --------------------------------
-        now     = time.time()
-        dropped = 0
-        for key, expiry in (data.get("cooldowns") or {}).items():
-            if float(expiry) > now:
-                _scanner_mod._cooldowns[key] = float(expiry)
-            else:
-                dropped += 1
-                print(f"[RESTORE] cooldown {key} expired - dropped")
-        if dropped:
-            print(f"[RESTORE] {dropped} expired cooldown(s) dropped")
-        if "cooldown_seconds" in data and data["cooldown_seconds"] is not None:
-            _scanner_mod.COOLDOWN_SECONDS = int(data["cooldown_seconds"])
 
         # -- Sanitize phantom trade-log entries (null/zero exit_price or |R| > 10) --
         _keep_log = []
@@ -954,6 +940,15 @@ def send_telegram(alert: dict) -> None:
     tp1       = float(alert.get("tp1_price", 0) or 0)
     leverage  = int(alert.get("leverage", 5) or 5)
     margin    = float(alert.get("margin", MARGIN_PER_TRADE) or MARGIN_PER_TRADE)
+    score = int(alert.get("score", 4) or 4)
+    _strength_map = {
+        4:  "●○○○",
+        6:  "●●○○",
+        8:  "●●●○",
+        10: "●●●●",
+    }
+    _strength = _strength_map.get(
+        score, "●○○○")
 
     tier_map  = {"HIGH_PROB": "\u29BF", "STRONG": "\u25C6"}
     tier_icon = tier_map.get(tier, "\u25CF")
@@ -980,6 +975,7 @@ def send_telegram(alert: dict) -> None:
         f"\U0001F7E0  MEXC \u00B7 {direction} {sym} \u00B7 {leverage}x {tier_icon}\n"
         "\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n"
         f"ENTRY  {_fmt_p(entry)}\n"
+        f"SIGNAL  {_strength} ({score}pts)\n"
         f"SL     {_fmt_p(sl)}   \u2212${max_loss:.2f}\n"
         f"TP1    {_fmt_p(tp1)}   +${tp1_profit_70:.2f} (70%)\n"
         "       runner trails after\n"
@@ -1731,7 +1727,7 @@ async def _exit_monitor_loop():
                 _cut_usd    = ADVERSE_CUT_USD.get(sym, ADVERSE_CUT_DEFAULT_USD)
                 _cpnl       = ((_entry - current) * _size if is_short
                                else (current - _entry) * _size)
-                # KILL — 60s grace then zero tolerance
+                # KILL â 60s grace then zero tolerance
                 _elapsed = time.time() - trade.get(
                     "opened_at", time.time())
                 if _elapsed >= 60 and _cpnl <= 0:
@@ -2027,7 +2023,7 @@ async def _exit_monitor_loop():
                         # NOTE: PAPER_MODE-only as of this build. If PAPER_MODE is ever
                         # set to False, this exit MUST also call
                         # await mexc_client.close_position(sym, direction, trade.get("remaining_size", trade.get("size", 0)))
-                        # BEFORE _do_close_trade below â otherwise the real exchange
+                        # BEFORE _do_close_trade below Ã¢ÂÂ otherwise the real exchange
                         # position stays open while internal state shows it closed.
                         if is_short:
                             _do_close_trade(key, trade, current, "PEAK_DECAY_20")
@@ -2668,61 +2664,143 @@ async def reset_session():
 async def get_settings():
     """Return live values of all runtime-adjustable scanner settings."""
     return {
-        "paper_mode":            PAPER_MODE,
-        "telegram_enabled":      TELEGRAM_ENABLED,
-        "cooldown_seconds":      _scanner_mod.COOLDOWN_SECONDS,
-        "depth_gate_pct":        _scanner_mod.DEPTH_GATE_PCT,
-        "adx_fade_max":          _scanner_mod.ADX_FADE_MAX,
-        "margin_per_trade":      MARGIN_PER_TRADE,
-        "daily_loss_limit":      DAILY_LOSS_LIMIT,
-        "consecutive_loss_stop": _scanner_mod.CONSECUTIVE_LOSS_STOP,
-        "j15m_short_gate":       _scanner_mod.J15M_SHORT_GATE,
-        "j15m_long_gate":        _scanner_mod.J15M_LONG_GATE,
-        "j1h_short_min":         _scanner_mod.J1H_SHORT_MIN,
+        "paper_mode":
+            PAPER_MODE,
+        "telegram_enabled":
+            TELEGRAM_ENABLED,
+        "depth_gate_pct":
+            _scanner_mod.DEPTH_GATE_PCT,
+        "adx_min_long":
+            _scanner_mod.ADX_MIN_LONG,
+        "j15m_short_gate":
+            _scanner_mod.J15M_SHORT_GATE,
+        "j15m_long_gate":
+            _scanner_mod.J15M_LONG_GATE,
+        "j1h_short_min":
+            _scanner_mod.J1H_SHORT_MIN,
+        "j1h_short_max":
+            _scanner_mod.J1H_SHORT_MAX,
+        "j1h_long_max":
+            _scanner_mod.J1H_LONG_MAX,
+        "atr_sl_multiplier":
+            _scanner_mod.ATR_SL_MULTIPLIER,
+        "tp1_close_pct":
+            _scanner_mod.TP1_CLOSE_PCT,
+        "tp2_r":
+            _scanner_mod.TP2_R,
+        "margin_per_trade":
+            MARGIN_PER_TRADE,
+        "daily_loss_limit":
+            DAILY_LOSS_LIMIT,
+        "consecutive_loss_stop":
+            CONSECUTIVE_LOSS_STOP,
     }
 
 
 @app.post("/api/settings")
 async def post_settings(request: Request):
     """Partial-update runtime settings. Only fields present in the body are changed."""
-    global PAPER_MODE, TELEGRAM_ENABLED, DAILY_LOSS_LIMIT, MARGIN_PER_TRADE, CONSECUTIVE_LOSS_STOP
+    global PAPER_MODE, TELEGRAM_ENABLED, \
+           DAILY_LOSS_LIMIT, MARGIN_PER_TRADE, \
+           CONSECUTIVE_LOSS_STOP
     body = await request.json()
     if "paper_mode" in body:
         PAPER_MODE = bool(body["paper_mode"])
         _scanner_mod.PAPER_MODE = PAPER_MODE
     if "telegram_enabled" in body:
-        TELEGRAM_ENABLED = bool(body["telegram_enabled"])
-    if "cooldown_seconds" in body:
-        _scanner_mod.COOLDOWN_SECONDS = int(body["cooldown_seconds"])
-        _sb = _get_supabase()
-        if _sb is not None:
-            try:
-                _sb.table("mexc_scanner_state").update(
-                    {"cooldown_seconds": _scanner_mod.COOLDOWN_SECONDS}
-                ).eq("id", 1).execute()
-            except Exception:
-                pass
+        TELEGRAM_ENABLED = bool(
+            body["telegram_enabled"])
     if "depth_gate_pct" in body:
-        _scanner_mod.DEPTH_GATE_PCT = float(body["depth_gate_pct"])
-    if "adx_fade_max" in body:
-        _scanner_mod.ADX_FADE_MAX = float(body["adx_fade_max"])
-    if "margin_per_trade" in body:
-        MARGIN_PER_TRADE = float(body["margin_per_trade"])
-        _scanner_mod.MARGIN_PER_TRADE = MARGIN_PER_TRADE
-    if "daily_loss_limit" in body:
-        DAILY_LOSS_LIMIT = float(body["daily_loss_limit"])
-    if "consecutive_loss_stop" in body:
-        CONSECUTIVE_LOSS_STOP = int(body["consecutive_loss_stop"])
-        _scanner_mod.CONSECUTIVE_LOSS_STOP = CONSECUTIVE_LOSS_STOP
+        _scanner_mod.DEPTH_GATE_PCT = float(
+            body["depth_gate_pct"])
+    if "adx_min_long" in body:
+        _scanner_mod.ADX_MIN_LONG = float(
+            body["adx_min_long"])
     if "j15m_short_gate" in body:
-        _scanner_mod.J15M_SHORT_GATE = float(body["j15m_short_gate"])
+        _scanner_mod.J15M_SHORT_GATE = float(
+            body["j15m_short_gate"])
     if "j15m_long_gate" in body:
-        _scanner_mod.J15M_LONG_GATE = float(body["j15m_long_gate"])
+        _scanner_mod.J15M_LONG_GATE = float(
+            body["j15m_long_gate"])
     if "j1h_short_min" in body:
-        _scanner_mod.J1H_SHORT_MIN = float(body["j1h_short_min"])
+        _scanner_mod.J1H_SHORT_MIN = float(
+            body["j1h_short_min"])
+    if "j1h_short_max" in body:
+        _scanner_mod.J1H_SHORT_MAX = float(
+            body["j1h_short_max"])
+    if "j1h_long_max" in body:
+        _scanner_mod.J1H_LONG_MAX = float(
+            body["j1h_long_max"])
+    if "atr_sl_multiplier" in body:
+        _scanner_mod.ATR_SL_MULTIPLIER = float(
+            body["atr_sl_multiplier"])
+    if "tp1_close_pct" in body:
+        _scanner_mod.TP1_CLOSE_PCT = float(
+            body["tp1_close_pct"])
+    if "tp2_r" in body:
+        _scanner_mod.TP2_R = float(
+            body["tp2_r"])
+    if "margin_per_trade" in body:
+        MARGIN_PER_TRADE = float(
+            body["margin_per_trade"])
+        _scanner_mod.MARGIN_PER_TRADE = \
+            MARGIN_PER_TRADE
+    if "daily_loss_limit" in body:
+        DAILY_LOSS_LIMIT = float(
+            body["daily_loss_limit"])
+    if "consecutive_loss_stop" in body:
+        CONSECUTIVE_LOSS_STOP = int(
+            body["consecutive_loss_stop"])
+        _scanner_mod.CONSECUTIVE_LOSS_STOP = \
+            CONSECUTIVE_LOSS_STOP
+
+    # Persist ALL settings to Supabase
+    # NOTE: columns require migration if not yet in schema.
+    _sb = _get_supabase()
+    if _sb is not None:
+        try:
+            _settings_payload = {
+                "paper_mode":
+                    PAPER_MODE,
+                "telegram_enabled":
+                    TELEGRAM_ENABLED,
+                "depth_gate_pct":
+                    _scanner_mod.DEPTH_GATE_PCT,
+                "adx_min_long":
+                    _scanner_mod.ADX_MIN_LONG,
+                "j15m_short_gate":
+                    _scanner_mod.J15M_SHORT_GATE,
+                "j15m_long_gate":
+                    _scanner_mod.J15M_LONG_GATE,
+                "j1h_short_min":
+                    _scanner_mod.J1H_SHORT_MIN,
+                "j1h_short_max":
+                    _scanner_mod.J1H_SHORT_MAX,
+                "j1h_long_max":
+                    _scanner_mod.J1H_LONG_MAX,
+                "atr_sl_multiplier":
+                    _scanner_mod.ATR_SL_MULTIPLIER,
+                "tp1_close_pct":
+                    _scanner_mod.TP1_CLOSE_PCT,
+                "tp2_r":
+                    _scanner_mod.TP2_R,
+                "margin_per_trade":
+                    MARGIN_PER_TRADE,
+                "daily_loss_limit":
+                    DAILY_LOSS_LIMIT,
+                "consecutive_loss_stop":
+                    CONSECUTIVE_LOSS_STOP,
+            }
+            _sb.table("mexc_scanner_state")\
+               .upsert(_settings_payload)\
+               .eq("id", 1).execute()
+        except Exception as _e:
+            print(f"[SETTINGS] Supabase "
+                  f"save failed: {_e}")
+
     return await get_settings()
 
-# -- Bot identity âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+# -- Bot identity Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
 
 @app.get("/api/bot-identity")
 async def get_bot_identity():

@@ -60,7 +60,7 @@ _session_sl_counts: dict[str, int]   = {}    # "SYMBOL_DIRECTION_SESSION" -> SL 
 _session_halted:    set[str]         = set() # "SYMBOL_DIRECTION_SESSION" halted for session
 _large_sl_cooldowns: dict[str, float] = {}   # "SYMBOLDIR" -> expiry ts for 90-min cooldowns
 _peak_shadow: dict = {}   # trade_key -> shadow tracking state (observation only)
-_sentinel_sweep: list = []   # deferred protective exits (PEAK_DECAY_20 / RUNNER_DECAY_10) — flushed once per scan cycle
+_sentinel_sweep: list = []   # deferred protective exits (PEAK_DECAY_20 / RUNNER_DECAY_10) â flushed once per scan cycle
 _adverse_shadow: dict = {}  # trade_key -> adverse-cut shadow state (observation only)
 _sign_shadow:   dict = {}  # trade_key -> PnL-sign transition history (observation only)
 _signal_shadow: dict = {}  # trade_key -> signal invalidation shadow state (observation only)
@@ -83,7 +83,7 @@ ADVERSE_CUT_USD: dict[str, float] = {
 }
 ADVERSE_CUT_DEFAULT_USD: float = 60.0
 
-# -- Bot identity ─────────────────────────────────────────────────────────────
+# -- Bot identity âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 BOT_INSTANCE_ID: str          = "default"
 _BOT_IDENTITY_COMMITTED: bool = False
 _prev_session:      str              = ""
@@ -259,14 +259,14 @@ def _get_supabase() -> Optional[Client]:
 
 
 def _alert_save_failure(error_msg: str) -> None:
-    """Telegram alert on _save_state() failure — at most once per 5 min (cooldown)."""
+    """Telegram alert on _save_state() failure â at most once per 5 min (cooldown)."""
     global _last_save_fail_alert
     now = datetime.now(timezone.utc)
     if _last_save_fail_alert and (now - _last_save_fail_alert) < timedelta(minutes=5):
         return
     _last_save_fail_alert = now
     msg = (
-        "⚠️ MEXC PERSIST FAILURE — _save_state() raised:\n"
+        "â ï¸ MEXC PERSIST FAILURE â _save_state() raised:\n"
         + error_msg
         + "\n\nCheck mexc_scanner_state immediately. State is NOT being saved."
     )
@@ -1477,7 +1477,8 @@ def _do_close_trade(key: str, trade: dict, exit_price: float, reason: str):
           else (entry - exit_price) * remaining
     r   = _compute_r(pnl, trade)
 
-    if reason == "ADVERSE_CUT" or (reason == "PEAK_DECAY_20" and pnl <= 0):
+    if (reason in ("ADVERSE_CUT", "SL", "KILL")
+            or (reason == "PEAK_DECAY_20" and pnl <= 0)):
         _now_ac  = datetime.now(timezone.utc)
         _dir_key = "long" if direction == "LONG" else "short"
         _scanner_mod._adverse_cluster[_dir_key].append(_now_ac)
@@ -1509,7 +1510,6 @@ def _do_close_trade(key: str, trade: dict, exit_price: float, reason: str):
     if key in app_state.open_trades:
         del app_state.open_trades[key]
     _retire_alert(sym, direction)
-    set_close_cooldown(sym, direction)
 
     print(f"[EXIT] {sym} {direction} closed at {exit_price} reason={reason} "
           f"pnl=${pnl:.2f} r={r:+.2f}R")
@@ -1731,21 +1731,12 @@ async def _exit_monitor_loop():
                 _cut_usd    = ADVERSE_CUT_USD.get(sym, ADVERSE_CUT_DEFAULT_USD)
                 _cpnl       = ((_entry - current) * _size if is_short
                                else (current - _entry) * _size)
-                # -- Dead on arrival: trade never moved >$1 favorably AND PnL at/below zero
-                if _mfe_pnl <= 1.0 and _cpnl <= 0.0:
-                    print(f"[DOA_CUT] {sym} {direction} "
-                          f"mfe={_mfe_pnl:.2f} "
-                          f"cpnl={_cpnl:.2f} -- "
-                          f"never started, cutting")
-                    _do_close_trade(key, trade, current, "DOA_CUT")
-                    continue
-                # -- BE_CUT: was profitable, now at zero or below
-                if _mfe_pnl >= 10.0 and _cpnl <= 0.0:
-                    print(f"[BE_CUT] {sym} {direction} "
-                          f"mfe={_mfe_pnl:.2f} "
-                          f"cpnl={_cpnl:.2f} -- "
-                          f"was profitable, now zero, cutting")
-                    _do_close_trade(key, trade, current, "BE_CUT")
+                # KILL — 60s grace then zero tolerance
+                _elapsed = time.time() - trade.get(
+                    "opened_at", time.time())
+                if _elapsed >= 60 and _cpnl <= 0:
+                    _do_close_trade(
+                        key, trade, current, "KILL")
                     continue
                 # -- ANCHOR time exit: 90 minutes max duration
                 _anchor_pairs = {
@@ -1765,10 +1756,6 @@ async def _exit_monitor_loop():
                             _do_close_trade(key, trade,
                                             current, "ANCHOR_TIME_EXIT")
                             continue
-                if _adv_pnl <= -_cut_usd and _mfe_pnl < 10.0:
-                    print(f"[ADVERSE_CUT] {sym} {direction} adv_pnl={_adv_pnl:.2f} cut={_cut_usd} mfe={_mfe_pnl:.2f} - closing")
-                    _do_close_trade(key, trade, current, "ADVERSE_CUT")
-                    continue
 
                 # -- Peak PnL protection shadow (observation only, no exit logic) ----
                 try:
@@ -2040,7 +2027,7 @@ async def _exit_monitor_loop():
                         # NOTE: PAPER_MODE-only as of this build. If PAPER_MODE is ever
                         # set to False, this exit MUST also call
                         # await mexc_client.close_position(sym, direction, trade.get("remaining_size", trade.get("size", 0)))
-                        # BEFORE _do_close_trade below — otherwise the real exchange
+                        # BEFORE _do_close_trade below â otherwise the real exchange
                         # position stays open while internal state shows it closed.
                         if is_short:
                             _do_close_trade(key, trade, current, "PEAK_DECAY_20")
@@ -2735,7 +2722,7 @@ async def post_settings(request: Request):
         _scanner_mod.J1H_SHORT_MIN = float(body["j1h_short_min"])
     return await get_settings()
 
-# -- Bot identity ─────────────────────────────────────────────────────────────────────────────
+# -- Bot identity âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 @app.get("/api/bot-identity")
 async def get_bot_identity():

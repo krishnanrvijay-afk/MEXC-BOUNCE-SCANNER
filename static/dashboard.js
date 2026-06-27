@@ -2768,12 +2768,7 @@ async function cfgFetch() {
     document.getElementById(
       'cfg-j1h-ob-max').value =
       d.j1h_long_max ?? 59;
-    document.getElementById(
-      'cfg-btc-j1h-long').value =
-      d.btc_j1h_long_max ?? 70;
-    document.getElementById(
-      'cfg-btc-j1h-short').value =
-      d.btc_j1h_short_max ?? 90;
+
     document.getElementById(
       'cfg-atr-sl').value =
       d.atr_sl_multiplier ?? 1.0;
@@ -2784,6 +2779,9 @@ async function cfgFetch() {
     document.getElementById(
       'cfg-tp2-r').value =
       d.tp2_r ?? 1.2;
+    document.getElementById(
+      'cfg-kill-cd').value =
+      d.kill_cooldown_seconds ?? 1800;
     document.getElementById(
       'cfg-margin').value =
       d.margin_per_trade ?? 2000;
@@ -2846,12 +2844,6 @@ async function cfgSave() {
     j1h_long_max: Number(
       document.getElementById(
       'cfg-j1h-ob-max').value),
-    btc_j1h_long_max: Number(
-      document.getElementById(
-      'cfg-btc-j1h-long').value),
-    btc_j1h_short_max: Number(
-      document.getElementById(
-      'cfg-btc-j1h-short').value),
     atr_sl_multiplier: Number(
       document.getElementById(
       'cfg-atr-sl').value),
@@ -2861,6 +2853,9 @@ async function cfgSave() {
     tp2_r: Number(
       document.getElementById(
       'cfg-tp2-r').value),
+    kill_cooldown_seconds: Number(
+      document.getElementById(
+      'cfg-kill-cd').value),
     margin_per_trade: Number(
       document.getElementById(
       'cfg-margin').value),

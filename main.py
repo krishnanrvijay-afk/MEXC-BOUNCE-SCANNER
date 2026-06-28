@@ -2079,28 +2079,39 @@ async def _exit_monitor_loop():
                     trade.get("margin", 2000)
                     * trade.get("leverage", 5))
                 _sentinel_min = _notional * _sentinel_pct
-                if not tp1_hit and _sh["be_armed"] and _sh["peak_pnl_usd"] >= _sentinel_min:
-                    _decay_threshold = 0.70 if sym in ("@107",) else 0.80
-                    if _cpnl < _sh["peak_pnl_usd"] * _decay_threshold:
-                        # NOTE: PAPER_MODE-only as of this build. If PAPER_MODE is ever
-                        # set to False, this exit MUST also call
-                        # await mexc_client.close_position(sym, direction, trade.get("remaining_size", trade.get("size", 0)))
-                        # BEFORE _do_close_trade below Ã¢ÂÂ otherwise the real exchange
-                        # position stays open while internal state shows it closed.
-                        if is_short:
-                            _do_close_trade(key, trade, current, "PEAK_DECAY_20")
-                            continue
-                    # LONG: PEAK_DECAY_10 on all pairs
-                    if not is_short:
-                        _anchor_decay = 0.90
-                        if _cpnl < _sh["peak_pnl_usd"] * _anchor_decay:
-                            print(f"[PEAK_DECAY_10] {sym} LONG "
-                                  f"peak={_sh['peak_pnl_usd']:.2f} "
-                                  f"cpnl={_cpnl:.2f} -- "
-                                  f"anchor 10pct decay, exiting")
-                            _do_close_trade(key, trade, current,
-                                            "PEAK_DECAY_10")
-                            continue
+                if _sh["be_armed"] and \
+                          _sh["peak_pnl_usd"] >= _sentinel_min:
+                      _decay_threshold = 0.70 \
+                          if sym in ("@107",) else 0.80
+
+                      # ── Before TP1: PEAK_DECAY_20 on both directions ──
+                      if not tp1_hit:
+                          if _cpnl < _sh["peak_pnl_usd"] \
+                                  * _decay_threshold:
+                              reason = "PEAK_DECAY_20"
+                              print(f"[PEAK_DECAY_20] "
+                                    f"{sym} {direction} "
+                                    f"peak={_sh['peak_pnl_usd']:.2f} "
+                                    f"cpnl={_cpnl:.2f} "
+                                    f"-- pre-TP1 decay")
+                              _do_close_trade(key, trade,
+                                  current, reason)
+                              continue
+
+                      # ── After TP1: PEAK_DECAY_10 on runner both directions ──
+                      if tp1_hit:
+                          _runner_decay = 0.90
+                          if _cpnl < _sh["peak_pnl_usd"] \
+                                  * _runner_decay:
+                              reason = "PEAK_DECAY_10"
+                              print(f"[PEAK_DECAY_10] "
+                                    f"{sym} {direction} "
+                                    f"peak={_sh['peak_pnl_usd']:.2f} "
+                                    f"cpnl={_cpnl:.2f} "
+                                    f"-- post-TP1 runner")
+                              _do_close_trade(key, trade,
+                                  current, reason)
+                              continue
 
                 # -- TRAILBLAZER: ATR trailing stop after tp1_hit --------------
                 if tp1_hit:

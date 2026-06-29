@@ -3,110 +3,26 @@ from datetime import datetime, timezone
 
 BASE = "https://contract.mexc.com/api/v1/contract/kline"
 
-SYM_MAP = {
-    "@107": "HYPE_USDT",
-    "ZEC":  "ZEC_USDT",
-}
-def to_mexc(sym):
-    if sym in SYM_MAP: return SYM_MAP[sym]
-    if sym.endswith("_USDT"): return sym
-    return sym + "_USDT"
-
-TRADES = [
-    # (label, venue, pair, dir, session,
-    #  close_ts_utc, duration_s, pnl)
-    ("HYPE SHORT US","mexc","HYPE_USDT","SHORT","US",
-     1782756300,6598,-545.18),
-    ("AVAX SHORT US","hl","AVAX","SHORT","US",
-     1782756300,5238,-452.44),
-    ("@107 SHORT US","hl","@107","SHORT","US",
-     1782756300,6546,-572.25),
-    ("WIF LONG US","hl","WIF","LONG","US",
-     1782756300,14216,386.78),
-    ("BTC LONG US","mexc","BTC_USDT","LONG","US",
-     1782751920,8777,211.02),
-    ("XRP LONG US","mexc","XRP_USDT","LONG","US",
-     1782751920,5994,230.39),
-    ("DOGE LONG US","mexc","DOGE_USDT","LONG","US",
-     1782751920,8770,186.75),
-    ("DOGE LONG US","hl","DOGE","LONG","US",
-     1782751860,8603,125.23),
-    ("BTC LONG US","hl","BTC","LONG","US",
-     1782751860,8728,219.13),
-    ("HYPE SHORT EU","mexc","HYPE_USDT","SHORT","EU",
-     1782745500,14395,-189.86),
-    ("WIF LONG US","mexc","WIF_USDT","LONG","US",
-     1782745500,3549,-554.32),
-    ("ETH LONG US","mexc","ETH_USDT","LONG","US",
-     1782745440,2871,93.93),
-    ("ADA LONG US","hl","ADA","LONG","US",
-     1782745440,2904,78.24),
-    ("AVAX LONG US","hl","AVAX","LONG","US",
-     1782745440,2080,125.84),
-    ("SOL SHORT EU","hl","SOL","SHORT","EU",
-     1782739080,9996,-384.88),
-    ("AVAX SHORT EU","hl","AVAX","SHORT","EU",
-     1782739080,9989,-157.57),
-    ("@107 SHORT EU","hl","@107","SHORT","EU",
-     1782739080,7933,-442.32),
-    ("BTC SHORT EU","hl","BTC","SHORT","EU",
-     1782737580,8076,84.47),
-    ("ZEC LONG EU","mexc","ZEC_USDT","LONG","EU",
-     1782737580,3998,50.31),
-    ("ADA SHORT EU","mexc","ADA_USDT","SHORT","EU",
-     1782737520,7292,68.97),
-    ("AVAX SHORT EU","mexc","AVAX_USDT","SHORT","EU",
-     1782737520,7912,106.21),
-    ("BTC SHORT EU","mexc","BTC_USDT","SHORT","EU",
-     1782737520,8202,107.73),
-    ("SUI LONG EU","hl","SUI","LONG","EU",
-     1782735900,2278,296.71),
-    ("ADA LONG ASIA","mexc","ADA_USDT","LONG","ASIA",
-     1782727380,16796,313.81),
-    ("XRP LONG ASIA","mexc","XRP_USDT","LONG","ASIA",
-     1782727380,17140,274.17),
-    ("ZEC LONG ASIA","mexc","ZEC_USDT","LONG","ASIA",
-     1782727380,17193,505.33),
-    ("WIF LONG ASIA","mexc","WIF_USDT","LONG","ASIA",
-     1782727380,17190,1200.00),
-    ("DOGE LONG ASIA","mexc","DOGE_USDT","LONG","ASIA",
-     1782727380,17184,200.39),
-    ("SUI LONG ASIA","hl","SUI","LONG","ASIA",
-     1782727320,16273,439.80),
-    ("@107 LONG ASIA","hl","@107","LONG","ASIA",
-     1782727320,16593,307.50),
-    ("XRP LONG ASIA","hl","XRP","LONG","ASIA",
-     1782727320,17144,283.67),
-    ("DOGE LONG ASIA","hl","DOGE","LONG","ASIA",
-     1782727320,17136,193.74),
-    ("ZEC LONG ASIA","hl","ZEC","LONG","ASIA",
-     1782727260,17109,538.48),
-    ("ETH SHORT ASIA","hl","ETH","SHORT","ASIA",
-     1782706980,820,36.37),
-    ("AVAX SHORT ASIA","mexc","AVAX_USDT","SHORT","ASIA",
-     1782706980,1174,37.91),
-    ("BTC SHORT ASIA","mexc","BTC_USDT","SHORT","ASIA",
-     1782706980,2143,54.93),
-    ("ETH SHORT ASIA","mexc","ETH_USDT","SHORT","ASIA",
-     1782706980,1626,62.86),
-    ("SOL SHORT ASIA","hl","SOL","SHORT","ASIA",
-     1782706980,1230,141.94),
-    ("DOGE SHORT ASIA","hl","DOGE","SHORT","ASIA",
-     1782706920,1844,127.49),
-]
+def to_ts(iso_str):
+    return int(datetime.fromisoformat(
+        iso_str.replace('+00','')
+    ).replace(
+        tzinfo=timezone.utc
+    ).timestamp())
 
 def fetch_klines(symbol, interval,
                  start_ts, end_ts):
-    url = f"{BASE}/{symbol}"
-    r = requests.get(url, params={
-        "interval": interval,
-        "start": start_ts,
-        "end": end_ts,
-    }, timeout=15)
+    r = requests.get(
+        f"{BASE}/{symbol}",
+        params={
+            "interval": interval,
+            "start": start_ts,
+            "end": end_ts,
+        }, timeout=15)
     r.raise_for_status()
     d = r.json()
     if not d.get("success"):
-        raise ValueError(str(d))
+        raise ValueError(str(d)[:120])
     raw = d["data"]
     out = []
     for i in range(len(raw["time"])):
@@ -129,39 +45,104 @@ def calc_kdj(candles, n=9):
         rsv = (c["c"]-lo)/rng*100 if rng>0 else 50.0
         K = (2/3)*K + (1/3)*rsv
         D = (2/3)*D + (1/3)*K
-        result.append(round(3*K - 2*D, 2))
+        result.append(round(3*K-2*D, 2))
     return result
 
 def zone(j):
+    if j is None: return "—"
     if j < 30: return "BEARISH"
     if j < 70: return "UNDECIDED"
     return "BULLISH"
 
-def fmt_ts(ts):
-    return datetime.fromtimestamp(
-        ts, tz=timezone.utc
-    ).strftime("%H:%M")
-
-def j1h_direction(j1h_vals):
-    if len(j1h_vals) < 2:
-        return "FLAT"
-    delta = j1h_vals[-1] - j1h_vals[0]
-    if delta > 10:  return "RISING"
-    if delta < -10: return "FALLING"
+def j1h_dir(vals):
+    v = [x for x in vals if x is not None]
+    if len(v) < 2: return "FLAT"
+    d = v[-1] - v[0]
+    if d > 10:  return "RISING"
+    if d < -10: return "FALLING"
     return "FLAT"
 
-csv_rows = []
+# All 20 trades: best 10 + worst 10
+# (close_utc, duration_s, symbol,
+#  direction, session, pnl, label)
+TRADES = [
+    # ── BEST 10 ────────────────────
+    ("2026-06-12 09:27:21+00", 26446,
+     "ZEC_USDT","LONG","ASIA",
+     237.92,"BEST-1 ZEC HL LONG ASIA TP1"),
+    ("2026-06-19 22:43:12+00", 18765,
+     "ZEC_USDT","LONG","ASIA",
+     234.59,"BEST-2 ZEC HL LONG ASIA TP1"),
+    ("2026-06-12 09:01:32+00", 7173,
+     "ZEC_USDT","LONG","EU",
+     233.50,"BEST-3 ZEC MEXC LONG EU TP1"),
+    ("2026-06-12 13:42:31+00", 13700,
+     "ZEC_USDT","SHORT","EU",
+     224.23,"BEST-4 ZEC MEXC SHORT EU TP1"),
+    ("2026-06-14 21:30:03+00", 35771,
+     "ZEC_USDT","LONG","EU",
+     220.35,"BEST-5 ZEC HL LONG EU TP1"),
+    ("2026-06-20 14:19:03+00", 51219,
+     "ZEC_USDT","SHORT","ASIA",
+     193.98,"BEST-6 ZEC HL SHORT ASIA MAN"),
+    ("2026-06-19 19:50:54+00", 1350,
+     "AVAX_USDT","LONG","ASIA",
+     190.58,"BEST-7 AVAX HL LONG ASIA TP1"),
+    ("2026-06-16 15:56:28+00", 2739,
+     "HYPE_USDT","LONG","US",
+     181.25,"BEST-8 HYPE MEXC LONG US TP1"),
+    ("2026-06-19 13:38:56+00", 31049,
+     "AVAX_USDT","LONG","ASIA",
+     178.27,"BEST-9 AVAX HL LONG ASIA TP1"),
+    ("2026-06-19 17:16:01+00", 44074,
+     "AVAX_USDT","LONG","ASIA",
+     160.08,"BEST-10 AVAX HL LONG ASIA MAN"),
+    # ── WORST 10 ─────────────────
+    ("2026-06-15 11:06:12+00", 15031,
+     "ZEC_USDT","SHORT","ASIA",
+     -479.63,"WORST-1 ZEC MEXC SHORT ASIA SL"),
+    ("2026-06-18 15:55:00+00", 41604,
+     "ZEC_USDT","LONG","ASIA",
+     -351.93,"WORST-2 ZEC MEXC LONG ASIA SL"),
+    ("2026-06-18 15:54:30+00", 41557,
+     "ZEC_USDT","LONG","ASIA",
+     -344.75,"WORST-3 ZEC HL LONG ASIA SL"),
+    ("2026-06-14 21:35:08+00", 5149,
+     "ZEC_USDT","SHORT","ASIA",
+     -337.39,"WORST-4 ZEC MEXC SHORT ASIA SL"),
+    ("2026-06-14 23:45:37+00", 4513,
+     "ZEC_USDT","SHORT","ASIA",
+     -333.09,"WORST-5 ZEC HL SHORT ASIA SL"),
+    ("2026-06-17 12:30:39+00", 917,
+     "ZEC_USDT","LONG","US",
+     -327.55,"WORST-6 ZEC HL LONG US SL"),
+    ("2026-06-26 17:46:46+00", 6895,
+     "AVAX_USDT","SHORT","US",
+     -303.37,"WORST-7 AVAX MEXC SHORT US DOA"),
+    ("2026-06-17 12:28:33+00", 759,
+     "ZEC_USDT","LONG","US",
+     -298.54,"WORST-8 ZEC MEXC LONG US SL"),
+    ("2026-06-14 23:46:11+00", 4448,
+     "ZEC_USDT","SHORT","ASIA",
+     -291.44,"WORST-9 ZEC HL SHORT ASIA SL"),
+    ("2026-06-19 03:15:26+00", 14565,
+     "AVAX_USDT","LONG","ASIA",
+     -208.89,"WORST-10 AVAX HL LONG ASIA SL"),
+]
 
-for (label, venue, pair, direction,
-     session, close_ts, duration,
-     pnl) in TRADES:
+rows = []
+print(f"\n{'LABEL':<36} {'J15M-IN':>8} "
+      f"{'J1H-IN':>8} {'J1H-DIR':>8} "
+      f"{'J15M-OUT':>9} {'J1H-OUT':>8} "
+      f"{'J1H-RNG':>12} {'PnL':>9}")
+print("-"*104)
 
-    entry_ts = close_ts - duration
-    sym = to_mexc(pair)
-    warmup = 2 * 3600
+for (close_utc, dur, sym, direction,
+     session, pnl, label) in TRADES:
 
-    print(f"\nProcessing: {label} "
-          f"({sym}) pnl={pnl:+.2f}")
+    close_ts = to_ts(close_utc)
+    entry_ts = close_ts - dur
+    warmup   = 3 * 3600
 
     try:
         c15 = fetch_klines(
@@ -170,188 +151,168 @@ for (label, venue, pair, direction,
             close_ts + 900)
         c1h = fetch_klines(
             sym, "Min60",
-            entry_ts - 4*3600,
+            entry_ts - 6*3600,
             close_ts + 3600)
     except Exception as e:
-        print(f"  FETCH ERROR: {e}")
-        csv_rows.append({
-            "label": label,
-            "venue": venue,
-            "pair": pair,
-            "direction": direction,
-            "session": session,
-            "pnl": pnl,
-            "error": str(e),
+        print(f"{label:<36} FETCH ERROR: {e}")
+        rows.append({
+            "label":label,"symbol":sym,
+            "direction":direction,
+            "session":session,"pnl":pnl,
+            "error":str(e)
         })
         continue
 
-    j15_vals = calc_kdj(c15)
-    j1h_vals_all = calc_kdj(c1h)
+    j15 = calc_kdj(c15)
+    j1h_all = calc_kdj(c1h)
 
-    # Build 1h J lookup
-    h1map = {}
+    # 1h J lookup
+    hmap = {}
     for idx, c in enumerate(c1h):
-        h1map[c["t"]] = j1h_vals_all[idx]
-    def get_j1h(t):
-        h = (t // 3600) * 3600
-        if h in h1map: return h1map[h]
-        for d in [-3600, 3600]:
-            if h+d in h1map:
-                return h1map[h+d]
+        hmap[c["t"]] = j1h_all[idx]
+    def gj1h(t):
+        h = (t//3600)*3600
+        if h in hmap: return hmap[h]
+        for d in [-3600,3600]:
+            if h+d in hmap:
+                return hmap[h+d]
         return None
 
-    # Filter to trade window
-    trade_candles = [
-        (c, j15_vals[i])
-        for i, c in enumerate(c15)
-        if entry_ts - 900 <= c["t"]
-        <= close_ts + 900
+    # Entry candle
+    entry_c = [(c,j15[i])
+               for i,c in enumerate(c15)
+               if c["t"] >= entry_ts]
+    exit_c  = [(c,j15[i])
+               for i,c in enumerate(c15)
+               if c["t"] <= close_ts]
+
+    j15_in  = entry_c[0][1] if entry_c else None
+    j15_out = exit_c[-1][1] if exit_c  else None
+    j1h_in  = gj1h(entry_c[0][0]["t"]) if entry_c else None
+    j1h_out = gj1h(exit_c[-1][0]["t"]) if exit_c  else None
+
+    # J1H during trade
+    j1h_dur = [
+        gj1h(c["t"])
+        for c,_ in entry_c
+        if gj1h(c["t"]) is not None
     ]
+    jdir  = j1h_dir(j1h_dur)
+    jmin  = min(j1h_dur) if j1h_dur else None
+    jmax  = max(j1h_dur) if j1h_dur else None
 
-    if not trade_candles:
-        print("  NO CANDLES IN WINDOW")
-        continue
-
-    # Entry / exit J values
-    entry_candles = [
-        (c, j) for c, j in trade_candles
-        if c["t"] >= entry_ts
-    ]
-    exit_candles = [
-        (c, j) for c, j in trade_candles
-        if c["t"] <= close_ts
-    ]
-
-    j15m_entry = (entry_candles[0][1]
-                  if entry_candles else None)
-    j15m_exit = (exit_candles[-1][1]
-                 if exit_candles else None)
-
-    j1h_entry = (get_j1h(entry_candles[0][0]["t"])
-                 if entry_candles else None)
-    j1h_exit = (get_j1h(exit_candles[-1][0]["t"])
-                if exit_candles else None)
-
-    # J1H values during trade
-    j1h_during = [
-        get_j1h(c["t"])
-        for c, _ in trade_candles
-        if c["t"] >= entry_ts
-           and get_j1h(c["t"]) is not None
-    ]
-    j1h_dir = j1h_direction(j1h_during)
-    j1h_min = (min(j1h_during)
-               if j1h_during else None)
-    j1h_max = (max(j1h_during)
-               if j1h_during else None)
-
-    # Zone crossings
-    prev_zone = None
-    crossings = []
-    for c, j in trade_candles:
-        if c["t"] < entry_ts:
-            prev_zone = zone(j)
-            continue
+    # Zone crossings on J15M
+    prev_z = None
+    crosses = []
+    for c,j in entry_c:
         z = zone(j)
-        if prev_zone and z != prev_zone:
-            crossings.append(
-                f"{fmt_ts(c['t'])}"
-                f" {prev_zone[0]}"
-                f"→{z[0]}"
-            )
-        prev_zone = z
+        if prev_z and z != prev_z:
+            t_str = datetime.fromtimestamp(
+                c["t"],tz=timezone.utc
+            ).strftime("%H:%M")
+            crosses.append(
+                f"{t_str} {prev_z[0]}→{z[0]}")
+        prev_z = z
 
-    cross_str = " | ".join(crossings) if crossings else "NONE"
+    # Signal exhaustion point
+    se_time = None
+    se_j15  = None
+    se_pnl  = None
+    below50 = False
+    for c,j in entry_c:
+        entry_price = entry_c[0][0]["c"]
+        sz = (5000*5)/entry_price
+        cp = ((c["c"]-entry_price)*sz
+              if direction=="LONG"
+              else (entry_price-c["c"])*sz)
+        if j < 50: below50 = True
+        if (below50 and j >= 50
+                and se_time is None
+                and cp > 0
+                and direction == "LONG"):
+            se_time = datetime.fromtimestamp(
+                c["t"],tz=timezone.utc
+            ).strftime("%H:%M")
+            se_j15 = j
+            se_pnl = round(cp,2)
+        # For SHORT: J crossing below 50
+        if (direction == "SHORT"
+                and j > 50 and se_time is None):
+            above50_ref = True
+        elif (direction == "SHORT"
+                and j <= 50
+                and se_time is None
+                and cp > 0):
+            se_time = datetime.fromtimestamp(
+                c["t"],tz=timezone.utc
+            ).strftime("%H:%M")
+            se_j15 = j
+            se_pnl = round(cp,2)
 
-    # Print summary
-    j15_entry_str = (
-        f"{j15m_entry:.1f}"
-        f"({zone(j15m_entry)[0]})"
-        if j15m_entry is not None
-        else "—"
-    )
-    j15_exit_str = (
-        f"{j15m_exit:.1f}"
-        f"({zone(j15m_exit)[0]})"
-        if j15m_exit is not None
-        else "—"
-    )
-    j1h_entry_str = (
-        f"{j1h_entry:.1f}"
-        f"({zone(j1h_entry)[0]})"
-        if j1h_entry is not None
-        else "—"
-    )
-    j1h_exit_str = (
-        f"{j1h_exit:.1f}"
-        f"({zone(j1h_exit)[0]})"
-        if j1h_exit is not None
-        else "—"
-    )
+    jrng = (f"{jmin:.0f}–{jmax:.0f}"
+            if jmin is not None else "—")
+    j15i = f"{j15_in:.1f}" if j15_in else "—"
+    j1hi = f"{j1h_in:.1f}" if j1h_in else "—"
+    j15o = f"{j15_out:.1f}" if j15_out else "—"
+    j1ho = f"{j1h_out:.1f}" if j1h_out else "—"
 
-    print(f"  J15M: {j15_entry_str} → {j15_exit_str}")
-    print(f"  J1H:  {j1h_entry_str} → "
-          f"{j1h_exit_str} [{j1h_dir}]")
-    print(f"  J1H range: "
-          f"{j1h_min:.1f}–{j1h_max:.1f}"
-          if j1h_min is not None
-          else "  J1H range: —")
-    print(f"  CROSSES: {cross_str}")
-    print(f"  PnL: {pnl:+.2f}")
+    print(f"{label:<36} {j15i:>8} "
+          f"{j1hi:>8} {jdir:>8} "
+          f"{j15o:>9} {j1ho:>8} "
+          f"{jrng:>12} {pnl:>+9.2f}")
 
-    csv_rows.append({
+    if crosses:
+        print(f"  {'J15M crosses:':<14} "
+              f"{' | '.join(crosses[:6])}")
+    if se_time:
+        print(f"  {'SE fires:':<14} "
+              f"{se_time} J15M={se_j15} "
+              f"PnL={se_pnl:+.2f} "
+              f"(vs final {pnl:+.2f})")
+
+    rows.append({
         "label":        label,
-        "venue":        venue,
-        "pair":         pair,
+        "symbol":       sym,
         "direction":    direction,
         "session":      session,
         "pnl":          pnl,
-        "j15m_entry":   j15m_entry,
-        "j15m_entry_zone": (
-            zone(j15m_entry)
-            if j15m_entry else ""
-        ),
-        "j1h_entry":    j1h_entry,
-        "j1h_entry_zone": (
-            zone(j1h_entry)
-            if j1h_entry else ""
-        ),
-        "j15m_exit":    j15m_exit,
-        "j15m_exit_zone": (
-            zone(j15m_exit)
-            if j15m_exit else ""
-        ),
-        "j1h_exit":     j1h_exit,
-        "j1h_exit_zone": (
-            zone(j1h_exit)
-            if j1h_exit else ""
-        ),
-        "j1h_direction": j1h_dir,
-        "j1h_min":      j1h_min,
-        "j1h_max":      j1h_max,
-        "zone_crossings": cross_str,
+        "j15m_entry":   j15_in,
+        "j15m_entry_zone": zone(j15_in),
+        "j1h_entry":    j1h_in,
+        "j1h_entry_zone": zone(j1h_in),
+        "j15m_exit":    j15_out,
+        "j15m_exit_zone": zone(j15_out),
+        "j1h_exit":     j1h_out,
+        "j1h_exit_zone": zone(j1h_out),
+        "j1h_direction": jdir,
+        "j1h_min":      jmin,
+        "j1h_max":      jmax,
+        "j15m_crosses": " | ".join(crosses[:8]),
+        "se_time":      se_time or "",
+        "se_j15m":      se_j15 or "",
+        "se_pnl":       se_pnl or "",
         "error":        "",
     })
 
 # Write CSV
 fields = [
-    "label","venue","pair",
-    "direction","session","pnl",
+    "label","symbol","direction",
+    "session","pnl",
     "j15m_entry","j15m_entry_zone",
     "j1h_entry","j1h_entry_zone",
     "j15m_exit","j15m_exit_zone",
     "j1h_exit","j1h_exit_zone",
-    "j1h_direction",
-    "j1h_min","j1h_max",
-    "zone_crossings","error",
+    "j1h_direction","j1h_min","j1h_max",
+    "j15m_crosses","se_time",
+    "se_j15m","se_pnl","error",
 ]
-with open("all_trades_candles.csv",
+with open("sentinel_case.csv",
           "w", newline="") as f:
-    w = csv.DictWriter(f,
-        fieldnames=fields,
+    w = csv.DictWriter(
+        f, fieldnames=fields,
         extrasaction="ignore")
     w.writeheader()
-    w.writerows(csv_rows)
+    w.writerows(rows)
 
-print(f"\nWrote all_trades_candles.csv"
-      f" — {len(csv_rows)} rows")
+print(f"\nWrote sentinel_case.csv"
+      f" — {len(rows)} rows")

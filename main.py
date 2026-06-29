@@ -60,7 +60,7 @@ _session_sl_counts: dict[str, int]   = {}    # "SYMBOL_DIRECTION_SESSION" -> SL 
 _session_halted:    set[str]         = set() # "SYMBOL_DIRECTION_SESSION" halted for session
 _large_sl_cooldowns: dict[str, float] = {}   # "SYMBOLDIR" -> expiry ts for 90-min cooldowns
 _peak_shadow: dict = {}   # trade_key -> shadow tracking state (observation only)
-_sentinel_sweep: list = []   # deferred protective exits (PEAK_DECAY_20 / RUNNER_DECAY_10) Ã¢ÂÂ flushed once per scan cycle
+_sentinel_sweep: list = []   # deferred protective exits (PEAK_DECAY_20 / RUNNER_DECAY_10) ÃÂ¢ÃÂÃÂ flushed once per scan cycle
 _adverse_shadow: dict = {}  # trade_key -> adverse-cut shadow state (observation only)
 _sign_shadow:   dict = {}  # trade_key -> PnL-sign transition history (observation only)
 _signal_shadow: dict = {}  # trade_key -> signal invalidation shadow state (observation only)
@@ -83,7 +83,7 @@ ADVERSE_CUT_USD: dict[str, float] = {
 }
 ADVERSE_CUT_DEFAULT_USD: float = 60.0
 
-# -- Bot identity Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
+# -- Bot identity ÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂ
 BOT_INSTANCE_ID: str          = "default"
 _BOT_IDENTITY_COMMITTED: bool = False
 _prev_session:      str              = ""
@@ -259,14 +259,14 @@ def _get_supabase() -> Optional[Client]:
 
 
 def _alert_save_failure(error_msg: str) -> None:
-    """Telegram alert on _save_state() failure Ã¢ÂÂ at most once per 5 min (cooldown)."""
+    """Telegram alert on _save_state() failure ÃÂ¢ÃÂÃÂ at most once per 5 min (cooldown)."""
     global _last_save_fail_alert
     now = datetime.now(timezone.utc)
     if _last_save_fail_alert and (now - _last_save_fail_alert) < timedelta(minutes=5):
         return
     _last_save_fail_alert = now
     msg = (
-        "Ã¢ÂÂ Ã¯Â¸Â MEXC PERSIST FAILURE Ã¢ÂÂ _save_state() raised:\n"
+        "ÃÂ¢ÃÂÃÂ ÃÂ¯ÃÂ¸ÃÂ MEXC PERSIST FAILURE ÃÂ¢ÃÂÃÂ _save_state() raised:\n"
         + error_msg
         + "\n\nCheck mexc_scanner_state immediately. State is NOT being saved."
     )
@@ -425,7 +425,7 @@ def _load_state():
             print(f"[SANITIZE] {len(_drop_log)} phantom trade(s) removed from restored log")
             _save_state()
 
-        # ── Restore settings from Supabase
+        # ââ Restore settings from Supabase
         if data.get("paper_mode") is not None:
             PAPER_MODE = bool(data["paper_mode"])
             _scanner_mod.PAPER_MODE = PAPER_MODE
@@ -1000,13 +1000,13 @@ def send_telegram(alert: dict) -> None:
     margin    = float(alert.get("margin", MARGIN_PER_TRADE) or MARGIN_PER_TRADE)
     score = int(alert.get("score", 4) or 4)
     _strength_map = {
-        4:  "●○○○",
-        6:  "●●○○",
-        8:  "●●●○",
-        10: "●●●●",
+        4:  "ââââ",
+        6:  "ââââ",
+        8:  "ââââ",
+        10: "ââââ",
     }
     _strength = _strength_map.get(
-        score, "●○○○")
+        score, "ââââ")
 
     tier_map  = {"HIGH_PROB": "\u29BF", "STRONG": "\u25C6"}
     tier_icon = tier_map.get(tier, "\u25CF")
@@ -1785,7 +1785,7 @@ async def _exit_monitor_loop():
                 _cut_usd    = ADVERSE_CUT_USD.get(sym, ADVERSE_CUT_DEFAULT_USD)
                 _cpnl       = ((_entry - current) * _size if is_short
                                else (current - _entry) * _size)
-                # KILL â 60s grace then zero tolerance
+                # KILL Ã¢ÂÂ 60s grace then zero tolerance
                 _elapsed = time.time() - trade.get(
                     "opened_at", time.time())
                 if _elapsed >= \
@@ -2089,7 +2089,7 @@ async def _exit_monitor_loop():
                       _decay_threshold = 0.70 \
                           if sym in ("@107",) else 0.80
 
-                      # ── Before TP1: PEAK_DECAY_20 on both directions ──
+                      # ââ Before TP1: PEAK_DECAY_20 on both directions ââ
                       if not tp1_hit:
                           if _cpnl < _sh["peak_pnl_usd"] \
                                   * _decay_threshold:
@@ -2103,7 +2103,7 @@ async def _exit_monitor_loop():
                                   current, reason)
                               continue
 
-                      # ── After TP1: PEAK_DECAY_10 on runner both directions ──
+                      # ââ After TP1: PEAK_DECAY_10 on runner both directions ââ
                       if tp1_hit:
                           _runner_decay = 0.90
                           if _cpnl < _sh["peak_pnl_usd"] \
@@ -2891,7 +2891,7 @@ async def post_settings(request: Request):
 
     return await get_settings()
 
-# -- Bot identity Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
+# -- Bot identity ÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂ
 
 @app.get("/api/bot-identity")
 async def get_bot_identity():
@@ -2964,6 +2964,103 @@ async def download_tradelog_csv():
         headers={"Content-Disposition": f"attachment; filename=trade_log_{today}.csv"},
     )
 
+
+
+  VALID_INTERVALS = {
+      "Min1", "Min5", "Min15", "Min30", "Min60",
+      "Hour4", "Hour8", "Day1",
+  }
+
+  def _kdj_from_candles(candles, n=9):
+      K, D = 50.0, 50.0
+      result = []
+      for i, c in enumerate(candles):
+          window = candles[max(0, i - n + 1):i + 1]
+          hi  = max(x["h"] for x in window)
+          lo  = min(x["l"] for x in window)
+          rng = hi - lo
+          rsv = (c["c"] - lo) / rng * 100 if rng > 0 else 50.0
+          K = (2 / 3) * K + (1 / 3) * rsv
+          D = (2 / 3) * D + (1 / 3) * K
+          J = 3 * K - 2 * D
+          result.append(round(J, 2))
+      return result
+
+  _CORS_HEADERS = {
+      "Access-Control-Allow-Origin":  "*",
+      "Access-Control-Allow-Methods": "GET",
+      "Content-Type":                 "application/json",
+  }
+
+  @app.options("/api/candles")
+  async def candles_options():
+      return JSONResponse(content={}, headers=_CORS_HEADERS, status_code=200)
+
+  @app.get("/api/candles")
+  async def get_candles(
+      symbol:   str = Query("WIF_USDT"),
+      interval: str = Query("Min15"),
+      start:    Optional[int] = Query(None),
+      end:      Optional[int] = Query(None),
+  ):
+      if start is None or end is None:
+          return JSONResponse(
+              {"error": "start and end required"},
+              status_code=400,
+              headers=_CORS_HEADERS,
+          )
+      if interval not in VALID_INTERVALS:
+          return JSONResponse(
+              {"error": f"invalid interval, accepted: {sorted(VALID_INTERVALS)}"},
+              status_code=400,
+              headers=_CORS_HEADERS,
+          )
+      mexc_url = (
+          f"https://contract.mexc.com/api/v1/contract/kline/{symbol}"
+          f"?interval={interval}&start={start}&end={end}"
+      )
+      try:
+          resp = requests.get(mexc_url, timeout=15)
+          resp.raise_for_status()
+          raw = resp.json()
+          if not raw.get("success"):
+              raise ValueError(f"MEXC error: {raw}")
+          d = raw["data"]
+          candles = sorted(
+              [
+                  {
+                      "t": int(d["time"][i]),
+                      "o": float(d["open"][i]),
+                      "h": float(d["high"][i]),
+                      "l": float(d["low"][i]),
+                      "c": float(d["close"][i]),
+                  }
+                  for i in range(len(d["time"]))
+              ],
+              key=lambda x: x["t"],
+          )
+      except Exception as e:
+          return JSONResponse(
+              {"error": "fetch failed", "detail": str(e)},
+              status_code=500,
+              headers=_CORS_HEADERS,
+          )
+      j_vals = _kdj_from_candles(candles)
+      out = [
+          {
+              "t":        c["t"],
+              "time_utc": datetime.fromtimestamp(c["t"], tz=timezone.utc).strftime("%H:%M"),
+              "open":     c["o"],
+              "high":     c["h"],
+              "low":      c["l"],
+              "close":    c["c"],
+              "j":        j_vals[idx],
+          }
+          for idx, c in enumerate(candles)
+      ]
+      return JSONResponse(content=out, headers=_CORS_HEADERS)
+
+  
 
 class DismissAlertRequest(BaseModel):
     symbol:    str

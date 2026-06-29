@@ -63,7 +63,7 @@ _btc_j1h: float = 50.0
 BTC_CORRELATION: dict = {
     "ETH": 0.94, "SOL": 0.86, "XRP": 0.84, "DOGE": 0.87,
     "LINK": 0.82, "AVAX": 0.80, "SUI": 0.82, "NEAR": 0.78,
-    "WIF": 0.65, "ARB": 0.70, "ZEC": 0.40,
+    "WIF": 0.65, "ARB": 0.70, "ZEC": 0.40, "ZEC_USDT": 0.40,
 }
 
 

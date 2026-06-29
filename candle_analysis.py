@@ -1,233 +1,357 @@
-import csv
-import requests
+import requests, csv
 from datetime import datetime, timezone
 
-SYMBOL = "WIF_USDT"
 BASE = "https://contract.mexc.com/api/v1/contract/kline"
 
-def fetch_klines(symbol, interval, start_ts, end_ts):
-    """Fetch candles from MEXC futures API.
-    interval: Min15 or Min60
-    start_ts / end_ts: Unix seconds"""
+SYM_MAP = {
+    "@107": "HYPE_USDT",
+    "ZEC":  "ZEC_USDT",
+}
+def to_mexc(sym):
+    if sym in SYM_MAP: return SYM_MAP[sym]
+    if sym.endswith("_USDT"): return sym
+    return sym + "_USDT"
+
+TRADES = [
+    # (label, venue, pair, dir, session,
+    #  close_ts_utc, duration_s, pnl)
+    ("HYPE SHORT US","mexc","HYPE_USDT","SHORT","US",
+     1782756300,6598,-545.18),
+    ("AVAX SHORT US","hl","AVAX","SHORT","US",
+     1782756300,5238,-452.44),
+    ("@107 SHORT US","hl","@107","SHORT","US",
+     1782756300,6546,-572.25),
+    ("WIF LONG US","hl","WIF","LONG","US",
+     1782756300,14216,386.78),
+    ("BTC LONG US","mexc","BTC_USDT","LONG","US",
+     1782751920,8777,211.02),
+    ("XRP LONG US","mexc","XRP_USDT","LONG","US",
+     1782751920,5994,230.39),
+    ("DOGE LONG US","mexc","DOGE_USDT","LONG","US",
+     1782751920,8770,186.75),
+    ("DOGE LONG US","hl","DOGE","LONG","US",
+     1782751860,8603,125.23),
+    ("BTC LONG US","hl","BTC","LONG","US",
+     1782751860,8728,219.13),
+    ("HYPE SHORT EU","mexc","HYPE_USDT","SHORT","EU",
+     1782745500,14395,-189.86),
+    ("WIF LONG US","mexc","WIF_USDT","LONG","US",
+     1782745500,3549,-554.32),
+    ("ETH LONG US","mexc","ETH_USDT","LONG","US",
+     1782745440,2871,93.93),
+    ("ADA LONG US","hl","ADA","LONG","US",
+     1782745440,2904,78.24),
+    ("AVAX LONG US","hl","AVAX","LONG","US",
+     1782745440,2080,125.84),
+    ("SOL SHORT EU","hl","SOL","SHORT","EU",
+     1782739080,9996,-384.88),
+    ("AVAX SHORT EU","hl","AVAX","SHORT","EU",
+     1782739080,9989,-157.57),
+    ("@107 SHORT EU","hl","@107","SHORT","EU",
+     1782739080,7933,-442.32),
+    ("BTC SHORT EU","hl","BTC","SHORT","EU",
+     1782737580,8076,84.47),
+    ("ZEC LONG EU","mexc","ZEC_USDT","LONG","EU",
+     1782737580,3998,50.31),
+    ("ADA SHORT EU","mexc","ADA_USDT","SHORT","EU",
+     1782737520,7292,68.97),
+    ("AVAX SHORT EU","mexc","AVAX_USDT","SHORT","EU",
+     1782737520,7912,106.21),
+    ("BTC SHORT EU","mexc","BTC_USDT","SHORT","EU",
+     1782737520,8202,107.73),
+    ("SUI LONG EU","hl","SUI","LONG","EU",
+     1782735900,2278,296.71),
+    ("ADA LONG ASIA","mexc","ADA_USDT","LONG","ASIA",
+     1782727380,16796,313.81),
+    ("XRP LONG ASIA","mexc","XRP_USDT","LONG","ASIA",
+     1782727380,17140,274.17),
+    ("ZEC LONG ASIA","mexc","ZEC_USDT","LONG","ASIA",
+     1782727380,17193,505.33),
+    ("WIF LONG ASIA","mexc","WIF_USDT","LONG","ASIA",
+     1782727380,17190,1200.00),
+    ("DOGE LONG ASIA","mexc","DOGE_USDT","LONG","ASIA",
+     1782727380,17184,200.39),
+    ("SUI LONG ASIA","hl","SUI","LONG","ASIA",
+     1782727320,16273,439.80),
+    ("@107 LONG ASIA","hl","@107","LONG","ASIA",
+     1782727320,16593,307.50),
+    ("XRP LONG ASIA","hl","XRP","LONG","ASIA",
+     1782727320,17144,283.67),
+    ("DOGE LONG ASIA","hl","DOGE","LONG","ASIA",
+     1782727320,17136,193.74),
+    ("ZEC LONG ASIA","hl","ZEC","LONG","ASIA",
+     1782727260,17109,538.48),
+    ("ETH SHORT ASIA","hl","ETH","SHORT","ASIA",
+     1782706980,820,36.37),
+    ("AVAX SHORT ASIA","mexc","AVAX_USDT","SHORT","ASIA",
+     1782706980,1174,37.91),
+    ("BTC SHORT ASIA","mexc","BTC_USDT","SHORT","ASIA",
+     1782706980,2143,54.93),
+    ("ETH SHORT ASIA","mexc","ETH_USDT","SHORT","ASIA",
+     1782706980,1626,62.86),
+    ("SOL SHORT ASIA","hl","SOL","SHORT","ASIA",
+     1782706980,1230,141.94),
+    ("DOGE SHORT ASIA","hl","DOGE","SHORT","ASIA",
+     1782706920,1844,127.49),
+]
+
+def fetch_klines(symbol, interval,
+                 start_ts, end_ts):
     url = f"{BASE}/{symbol}"
-    params = {
+    r = requests.get(url, params={
         "interval": interval,
         "start": start_ts,
         "end": end_ts,
-    }
-    r = requests.get(url, params=params, timeout=15)
+    }, timeout=15)
     r.raise_for_status()
-    data = r.json()
-    if not data.get("success"):
-        raise ValueError(f"API error: {data}")
-    d = data["data"]
-    candles = []
-    for i in range(len(d["time"])):
-        candles.append({
-            "t": d["time"][i],
-            "o": float(d["open"][i]),
-            "h": float(d["high"][i]),
-            "l": float(d["low"][i]),
-            "c": float(d["close"][i]),
+    d = r.json()
+    if not d.get("success"):
+        raise ValueError(str(d))
+    raw = d["data"]
+    out = []
+    for i in range(len(raw["time"])):
+        out.append({
+            "t": int(raw["time"][i]),
+            "h": float(raw["high"][i]),
+            "l": float(raw["low"][i]),
+            "c": float(raw["close"][i]),
         })
-    return sorted(candles, key=lambda x: x["t"])
+    return sorted(out, key=lambda x: x["t"])
 
 def calc_kdj(candles, n=9):
     K, D = 50.0, 50.0
     result = []
     for i, c in enumerate(candles):
-        window = candles[max(0, i-n+1):i+1]
-        hi = max(x["h"] for x in window)
-        lo = min(x["l"] for x in window)
+        w = candles[max(0,i-n+1):i+1]
+        hi = max(x["h"] for x in w)
+        lo = min(x["l"] for x in w)
         rng = hi - lo
-        rsv = 50.0 if rng < 1e-10 else (c["c"] - lo) / rng * 100
-        K = (2/3) * K + (1/3) * rsv
-        D = (2/3) * D + (1/3) * K
-        J = 3*K - 2*D
-        result.append({
-            "K": round(K, 2),
-            "D": round(D, 2),
-            "J": round(J, 2)
-        })
+        rsv = (c["c"]-lo)/rng*100 if rng>0 else 50.0
+        K = (2/3)*K + (1/3)*rsv
+        D = (2/3)*D + (1/3)*K
+        result.append(round(3*K - 2*D, 2))
     return result
 
-def calc_pnl(entry, close, direction, margin=5000, lev=5):
-    size = (margin * lev) / entry
-    if direction == "LONG":
-        return round((close - entry) * size, 2)
-    else:
-        return round((entry - close) * size, 2)
-
 def zone(j):
-    if j < 30:  return "BEARISH"
-    if j < 70:  return "UNDECIDED"
+    if j < 30: return "BEARISH"
+    if j < 70: return "UNDECIDED"
     return "BULLISH"
 
 def fmt_ts(ts):
-    return datetime.fromtimestamp(ts,
-        tz=timezone.utc).strftime("%H:%M")
+    return datetime.fromtimestamp(
+        ts, tz=timezone.utc
+    ).strftime("%H:%M")
 
-def print_table(title, candles, kdj15, kdj1h_map,
-                trade, entry_ts, exit_ts, csv_path):
-    print()
-    print("=" * 72)
-    print(f"  {title}")
-    print(f"  Entry {trade['entry']:.5f} | "
-          f"Exit {trade['exit']:.5f} | "
-          f"Dir {trade['dir']}")
-    print("=" * 72)
-    print(f"{'TIME':>6}  {'PRICE':>8}  "
-          f"{'J15M':>7}  {'ZONE15':>9}  "
-          f"{'J1H':>6}  {'ZONE1H':>9}  "
-          f"{'PnL':>8}  {'STATUS'}")
-    print("-" * 72)
+def j1h_direction(j1h_vals):
+    if len(j1h_vals) < 2:
+        return "FLAT"
+    delta = j1h_vals[-1] - j1h_vals[0]
+    if delta > 10:  return "RISING"
+    if delta < -10: return "FALLING"
+    return "FLAT"
 
-    prev_zone15 = None
-    csv_rows = []
-    for i, c in enumerate(candles):
-        t = c["t"]
-        if t < entry_ts - 30*60:
-            continue
-        if t > exit_ts + 15*60:
-            break
+csv_rows = []
 
-        j15 = kdj15[i]["J"]
-        j1h = kdj1h_map.get(
-            (t // 3600) * 3600, None)
-        z15 = zone(j15)
-        z1h = zone(j1h) if j1h is not None else ""
-        pnl = calc_pnl(
-            trade["entry"], c["c"],
-            trade["dir"]) if t >= entry_ts else None
+for (label, venue, pair, direction,
+     session, close_ts, duration,
+     pnl) in TRADES:
 
-        # Detect zone transitions
-        csv_status = ""
-        txt_status = ""
-        if prev_zone15 and zone(j15) != prev_zone15:
-            csv_status = f"ZONE_CROSS:{prev_zone15}->{zone(j15)}"
-            txt_status = f"<-- ZONE CROSS {prev_zone15} -> {zone(j15)}"
-        if t == entry_ts:
-            csv_status = "ENTRY"
-            txt_status = "<-- ENTRY"
-        if t >= exit_ts and t < exit_ts + 15*60:
-            csv_status = "EXIT"
-            txt_status = "<-- EXIT"
-        prev_zone15 = zone(j15)
+    entry_ts = close_ts - duration
+    sym = to_mexc(pair)
+    warmup = 2 * 3600
 
-        pnl_str = f"${pnl:+.2f}" if pnl is not None else "      "
-        j1h_str = f"{j1h:6.1f}" if j1h is not None else "   —  "
-        z1h_pad = z1h.ljust(9) if z1h else "   —     "
-        z15_pad = z15.ljust(9)
+    print(f"\nProcessing: {label} "
+          f"({sym}) pnl={pnl:+.2f}")
 
-        print(f"{fmt_ts(t):>6}  "
-              f"{c['c']:8.5f}  "
-              f"{j15:7.1f}  "
-              f"{z15_pad:>9}  "
-              f"{j1h_str}  "
-              f"{z1h_pad:>9}  "
-              f"{pnl_str:>8}  "
-              f"{txt_status}")
-
+    try:
+        c15 = fetch_klines(
+            sym, "Min15",
+            entry_ts - warmup,
+            close_ts + 900)
+        c1h = fetch_klines(
+            sym, "Min60",
+            entry_ts - 4*3600,
+            close_ts + 3600)
+    except Exception as e:
+        print(f"  FETCH ERROR: {e}")
         csv_rows.append({
-            "time_utc":   fmt_ts(t),
-            "price":      f"{c['c']:.5f}",
-            "j15m":       f"{j15:.2f}",
-            "zone15":     z15,
-            "j1h":        f"{j1h:.2f}" if j1h is not None else "",
-            "zone1h":     z1h,
-            "pnl_dollars": f"{pnl:.2f}" if pnl is not None else "",
-            "status":     csv_status,
+            "label": label,
+            "venue": venue,
+            "pair": pair,
+            "direction": direction,
+            "session": session,
+            "pnl": pnl,
+            "error": str(e),
         })
+        continue
 
-    print("-" * 72)
-    print()
+    j15_vals = calc_kdj(c15)
+    j1h_vals_all = calc_kdj(c1h)
 
-    # Write CSV
-    fieldnames = ["time_utc", "price", "j15m", "zone15",
-                  "j1h", "zone1h", "pnl_dollars", "status"]
-    with open(csv_path, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(csv_rows)
-    return len(csv_rows)
+    # Build 1h J lookup
+    h1map = {}
+    for idx, c in enumerate(c1h):
+        h1map[c["t"]] = j1h_vals_all[idx]
+    def get_j1h(t):
+        h = (t // 3600) * 3600
+        if h in h1map: return h1map[h]
+        for d in [-3600, 3600]:
+            if h+d in h1map:
+                return h1map[h+d]
+        return None
 
-if __name__ == "__main__":
+    # Filter to trade window
+    trade_candles = [
+        (c, j15_vals[i])
+        for i, c in enumerate(c15)
+        if entry_ts - 900 <= c["t"]
+        <= close_ts + 900
+    ]
 
-    # -- TRADE DEFINITIONS --
-    WINNER = {
-        "dir": "LONG",
-        "entry": 0.17500,
-        "exit":  0.18340,
-        "entry_ts": int(datetime(
-            2026,6,29,5,17,14,
-            tzinfo=timezone.utc).timestamp()),
-        "exit_ts": int(datetime(
-            2026,6,29,10,3,44,
-            tzinfo=timezone.utc).timestamp()),
-    }
-    LOSER = {
-        "dir": "LONG",
-        "entry": 0.18040,
-        "exit":  0.17640,
-        "entry_ts": int(datetime(
-            2026,6,29,14,6,0,
-            tzinfo=timezone.utc).timestamp()),
-        "exit_ts": int(datetime(
-            2026,6,29,15,5,0,
-            tzinfo=timezone.utc).timestamp()),
-    }
+    if not trade_candles:
+        print("  NO CANDLES IN WINDOW")
+        continue
 
-    print("Fetching WIF_USDT candles from MEXC...")
+    # Entry / exit J values
+    entry_candles = [
+        (c, j) for c, j in trade_candles
+        if c["t"] >= entry_ts
+    ]
+    exit_candles = [
+        (c, j) for c, j in trade_candles
+        if c["t"] <= close_ts
+    ]
 
-    w15 = fetch_klines(
-        SYMBOL, "Min15",
-        WINNER["entry_ts"] - 3*3600,
-        WINNER["exit_ts"] + 3600)
+    j15m_entry = (entry_candles[0][1]
+                  if entry_candles else None)
+    j15m_exit = (exit_candles[-1][1]
+                 if exit_candles else None)
 
-    l15 = fetch_klines(
-        SYMBOL, "Min15",
-        LOSER["entry_ts"] - 3*3600,
-        LOSER["exit_ts"] + 3600)
+    j1h_entry = (get_j1h(entry_candles[0][0]["t"])
+                 if entry_candles else None)
+    j1h_exit = (get_j1h(exit_candles[-1][0]["t"])
+                if exit_candles else None)
 
-    h1 = fetch_klines(
-        SYMBOL, "Min60",
-        WINNER["entry_ts"] - 24*3600,
-        LOSER["exit_ts"] + 3600)
+    # J1H values during trade
+    j1h_during = [
+        get_j1h(c["t"])
+        for c, _ in trade_candles
+        if c["t"] >= entry_ts
+           and get_j1h(c["t"]) is not None
+    ]
+    j1h_dir = j1h_direction(j1h_during)
+    j1h_min = (min(j1h_during)
+               if j1h_during else None)
+    j1h_max = (max(j1h_during)
+               if j1h_during else None)
 
-    print(f"Fetched {len(w15)} x 15m candles (winner)")
-    print(f"Fetched {len(l15)} x 15m candles (loser)")
-    print(f"Fetched {len(h1)} x 1h candles")
+    # Zone crossings
+    prev_zone = None
+    crossings = []
+    for c, j in trade_candles:
+        if c["t"] < entry_ts:
+            prev_zone = zone(j)
+            continue
+        z = zone(j)
+        if prev_zone and z != prev_zone:
+            crossings.append(
+                f"{fmt_ts(c['t'])}"
+                f" {prev_zone[0]}"
+                f"→{z[0]}"
+            )
+        prev_zone = z
 
-    kdj_w15 = calc_kdj(w15)
-    kdj_l15 = calc_kdj(l15)
-    kdj_h1  = calc_kdj(h1)
+    cross_str = " | ".join(crossings) if crossings else "NONE"
 
-    h1_map = {
-        c["t"]: kdj_h1[i]["J"]
-        for i, c in enumerate(h1)
-    }
+    # Print summary
+    j15_entry_str = (
+        f"{j15m_entry:.1f}"
+        f"({zone(j15m_entry)[0]})"
+        if j15m_entry is not None
+        else "—"
+    )
+    j15_exit_str = (
+        f"{j15m_exit:.1f}"
+        f"({zone(j15m_exit)[0]})"
+        if j15m_exit is not None
+        else "—"
+    )
+    j1h_entry_str = (
+        f"{j1h_entry:.1f}"
+        f"({zone(j1h_entry)[0]})"
+        if j1h_entry is not None
+        else "—"
+    )
+    j1h_exit_str = (
+        f"{j1h_exit:.1f}"
+        f"({zone(j1h_exit)[0]})"
+        if j1h_exit is not None
+        else "—"
+    )
 
-    n_winner = print_table(
-        "ASIA WINNER +$1,200 — J15M JOURNEY",
-        w15, kdj_w15, h1_map,
-        WINNER,
-        WINNER["entry_ts"],
-        WINNER["exit_ts"],
-        "winner_candles.csv")
+    print(f"  J15M: {j15_entry_str} → {j15_exit_str}")
+    print(f"  J1H:  {j1h_entry_str} → "
+          f"{j1h_exit_str} [{j1h_dir}]")
+    print(f"  J1H range: "
+          f"{j1h_min:.1f}–{j1h_max:.1f}"
+          if j1h_min is not None
+          else "  J1H range: —")
+    print(f"  CROSSES: {cross_str}")
+    print(f"  PnL: {pnl:+.2f}")
 
-    n_loser = print_table(
-        "US LOSER -$554 — J15M JOURNEY",
-        l15, kdj_l15, h1_map,
-        LOSER,
-        LOSER["entry_ts"],
-        LOSER["exit_ts"],
-        "loser_candles.csv")
+    csv_rows.append({
+        "label":        label,
+        "venue":        venue,
+        "pair":         pair,
+        "direction":    direction,
+        "session":      session,
+        "pnl":          pnl,
+        "j15m_entry":   j15m_entry,
+        "j15m_entry_zone": (
+            zone(j15m_entry)
+            if j15m_entry else ""
+        ),
+        "j1h_entry":    j1h_entry,
+        "j1h_entry_zone": (
+            zone(j1h_entry)
+            if j1h_entry else ""
+        ),
+        "j15m_exit":    j15m_exit,
+        "j15m_exit_zone": (
+            zone(j15m_exit)
+            if j15m_exit else ""
+        ),
+        "j1h_exit":     j1h_exit,
+        "j1h_exit_zone": (
+            zone(j1h_exit)
+            if j1h_exit else ""
+        ),
+        "j1h_direction": j1h_dir,
+        "j1h_min":      j1h_min,
+        "j1h_max":      j1h_max,
+        "zone_crossings": cross_str,
+        "error":        "",
+    })
 
-    print(f"Wrote winner_candles.csv — {n_winner} rows")
-    print(f"Wrote loser_candles.csv — {n_loser} rows")
+# Write CSV
+fields = [
+    "label","venue","pair",
+    "direction","session","pnl",
+    "j15m_entry","j15m_entry_zone",
+    "j1h_entry","j1h_entry_zone",
+    "j15m_exit","j15m_exit_zone",
+    "j1h_exit","j1h_exit_zone",
+    "j1h_direction",
+    "j1h_min","j1h_max",
+    "zone_crossings","error",
+]
+with open("all_trades_candles.csv",
+          "w", newline="") as f:
+    w = csv.DictWriter(f,
+        fieldnames=fields,
+        extrasaction="ignore")
+    w.writeheader()
+    w.writerows(csv_rows)
 
-    print("Zone definitions:")
-    print("  BEARISH   = J < 30")
-    print("  UNDECIDED = J 30 - 70")
-    print("  BULLISH   = J > 70")
-    print()
+print(f"\nWrote all_trades_candles.csv"
+      f" — {len(csv_rows)} rows")

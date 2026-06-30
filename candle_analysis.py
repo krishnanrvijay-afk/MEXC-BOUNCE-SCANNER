@@ -34,285 +34,188 @@ def fetch_klines(symbol, interval,
         })
     return sorted(out, key=lambda x: x["t"])
 
-def calc_kdj(candles, n=9):
-    K, D = 50.0, 50.0
-    result = []
-    for i, c in enumerate(candles):
-        w = candles[max(0,i-n+1):i+1]
-        hi = max(x["h"] for x in w)
-        lo = min(x["l"] for x in w)
-        rng = hi - lo
-        rsv = (c["c"]-lo)/rng*100 if rng>0 else 50.0
-        K = (2/3)*K + (1/3)*rsv
-        D = (2/3)*D + (1/3)*K
-        result.append(round(3*K-2*D, 2))
-    return result
+# Use Min1 candles for fine-grained
+# checkpoint analysis near entry
 
-def zone(j):
-    if j is None: return "—"
-    if j < 30: return "BEARISH"
-    if j < 70: return "UNDECIDED"
-    return "BULLISH"
+CHECKPOINTS_SEC = [90, 300, 600, 900,
+                   1800, 2700, 3600]
 
-def j1h_dir(vals):
-    v = [x for x in vals if x is not None]
-    if len(v) < 2: return "FLAT"
-    d = v[-1] - v[0]
-    if d > 10:  return "RISING"
-    if d < -10: return "FALLING"
-    return "FLAT"
-
-# All 20 trades: best 10 + worst 10
-# (close_utc, duration_s, symbol,
-#  direction, session, pnl, label)
+# All 30 trades: 20 best/worst archive
+# + WIF winner/loser from today
 TRADES = [
-    # ── BEST 10 ────────────────────
-    ("2026-06-12 09:27:21+00", 26446,
-     "ZEC_USDT","LONG","ASIA",
-     237.92,"BEST-1 ZEC HL LONG ASIA TP1"),
-    ("2026-06-19 22:43:12+00", 18765,
-     "ZEC_USDT","LONG","ASIA",
-     234.59,"BEST-2 ZEC HL LONG ASIA TP1"),
-    ("2026-06-12 09:01:32+00", 7173,
-     "ZEC_USDT","LONG","EU",
-     233.50,"BEST-3 ZEC MEXC LONG EU TP1"),
-    ("2026-06-12 13:42:31+00", 13700,
-     "ZEC_USDT","SHORT","EU",
-     224.23,"BEST-4 ZEC MEXC SHORT EU TP1"),
-    ("2026-06-14 21:30:03+00", 35771,
-     "ZEC_USDT","LONG","EU",
-     220.35,"BEST-5 ZEC HL LONG EU TP1"),
-    ("2026-06-20 14:19:03+00", 51219,
-     "ZEC_USDT","SHORT","ASIA",
-     193.98,"BEST-6 ZEC HL SHORT ASIA MAN"),
-    ("2026-06-19 19:50:54+00", 1350,
-     "AVAX_USDT","LONG","ASIA",
-     190.58,"BEST-7 AVAX HL LONG ASIA TP1"),
-    ("2026-06-16 15:56:28+00", 2739,
-     "HYPE_USDT","LONG","US",
-     181.25,"BEST-8 HYPE MEXC LONG US TP1"),
-    ("2026-06-19 13:38:56+00", 31049,
-     "AVAX_USDT","LONG","ASIA",
-     178.27,"BEST-9 AVAX HL LONG ASIA TP1"),
-    ("2026-06-19 17:16:01+00", 44074,
-     "AVAX_USDT","LONG","ASIA",
-     160.08,"BEST-10 AVAX HL LONG ASIA MAN"),
-    # ── WORST 10 ─────────────────
-    ("2026-06-15 11:06:12+00", 15031,
-     "ZEC_USDT","SHORT","ASIA",
-     -479.63,"WORST-1 ZEC MEXC SHORT ASIA SL"),
-    ("2026-06-18 15:55:00+00", 41604,
-     "ZEC_USDT","LONG","ASIA",
-     -351.93,"WORST-2 ZEC MEXC LONG ASIA SL"),
-    ("2026-06-18 15:54:30+00", 41557,
-     "ZEC_USDT","LONG","ASIA",
-     -344.75,"WORST-3 ZEC HL LONG ASIA SL"),
-    ("2026-06-14 21:35:08+00", 5149,
-     "ZEC_USDT","SHORT","ASIA",
-     -337.39,"WORST-4 ZEC MEXC SHORT ASIA SL"),
-    ("2026-06-14 23:45:37+00", 4513,
-     "ZEC_USDT","SHORT","ASIA",
-     -333.09,"WORST-5 ZEC HL SHORT ASIA SL"),
-    ("2026-06-17 12:30:39+00", 917,
-     "ZEC_USDT","LONG","US",
-     -327.55,"WORST-6 ZEC HL LONG US SL"),
-    ("2026-06-26 17:46:46+00", 6895,
-     "AVAX_USDT","SHORT","US",
-     -303.37,"WORST-7 AVAX MEXC SHORT US DOA"),
-    ("2026-06-17 12:28:33+00", 759,
-     "ZEC_USDT","LONG","US",
-     -298.54,"WORST-8 ZEC MEXC LONG US SL"),
-    ("2026-06-14 23:46:11+00", 4448,
-     "ZEC_USDT","SHORT","ASIA",
-     -291.44,"WORST-9 ZEC HL SHORT ASIA SL"),
-    ("2026-06-19 03:15:26+00", 14565,
-     "AVAX_USDT","LONG","ASIA",
-     -208.89,"WORST-10 AVAX HL LONG ASIA SL"),
+    # (label, close_utc, duration_s,
+    #  symbol, direction, entry_price,
+    #  final_pnl, outcome)
+    ("WIF-WINNER","2026-06-29 10:03:44+00",
+     17190,"WIF_USDT","LONG",0.17500,
+     1200.00,"WINNER"),
+    ("WIF-LOSER","2026-06-29 15:05:00+00",
+     3549,"WIF_USDT","LONG",0.18040,
+     -554.32,"LOSER"),
+    ("BEST-1","2026-06-12 09:27:21+00",
+     26446,"ZEC_USDT","LONG",None,
+     237.92,"WINNER"),
+    ("BEST-2","2026-06-19 22:43:12+00",
+     18765,"ZEC_USDT","LONG",None,
+     234.59,"WINNER"),
+    ("BEST-3","2026-06-12 09:01:32+00",
+     7173,"ZEC_USDT","LONG",None,
+     233.50,"WINNER"),
+    ("BEST-4","2026-06-12 13:42:31+00",
+     13700,"ZEC_USDT","SHORT",None,
+     224.23,"WINNER"),
+    ("BEST-5","2026-06-14 21:30:03+00",
+     35771,"ZEC_USDT","LONG",None,
+     220.35,"WINNER"),
+    ("BEST-6","2026-06-20 14:19:03+00",
+     51219,"ZEC_USDT","SHORT",None,
+     193.98,"WINNER"),
+    ("BEST-7","2026-06-19 19:50:54+00",
+     1350,"AVAX_USDT","LONG",None,
+     190.58,"WINNER"),
+    ("BEST-8","2026-06-16 15:56:28+00",
+     2739,"HYPE_USDT","LONG",None,
+     181.25,"WINNER"),
+    ("BEST-9","2026-06-19 13:38:56+00",
+     31049,"AVAX_USDT","LONG",None,
+     178.27,"WINNER"),
+    ("BEST-10","2026-06-19 17:16:01+00",
+     44074,"AVAX_USDT","LONG",None,
+     160.08,"WINNER"),
+    ("WORST-1","2026-06-15 11:06:12+00",
+     15031,"ZEC_USDT","SHORT",None,
+     -479.63,"LOSER"),
+    ("WORST-2","2026-06-18 15:55:00+00",
+     41604,"ZEC_USDT","LONG",None,
+     -351.93,"LOSER"),
+    ("WORST-3","2026-06-18 15:54:30+00",
+     41557,"ZEC_USDT","LONG",None,
+     -344.75,"LOSER"),
+    ("WORST-4","2026-06-14 21:35:08+00",
+     5149,"ZEC_USDT","SHORT",None,
+     -337.39,"LOSER"),
+    ("WORST-5","2026-06-14 23:45:37+00",
+     4513,"ZEC_USDT","SHORT",None,
+     -333.09,"LOSER"),
+    ("WORST-6","2026-06-17 12:30:39+00",
+     917,"ZEC_USDT","LONG",None,
+     -327.55,"LOSER"),
+    ("WORST-7","2026-06-26 17:46:46+00",
+     6895,"AVAX_USDT","SHORT",None,
+     -303.37,"LOSER"),
+    ("WORST-8","2026-06-17 12:28:33+00",
+     759,"ZEC_USDT","LONG",None,
+     -298.54,"LOSER"),
+    ("WORST-9","2026-06-14 23:46:11+00",
+     4448,"ZEC_USDT","SHORT",None,
+     -291.44,"LOSER"),
+    ("WORST-10","2026-06-19 03:15:26+00",
+     14565,"AVAX_USDT","LONG",None,
+     -208.89,"LOSER"),
 ]
 
 rows = []
-print(f"\n{'LABEL':<36} {'J15M-IN':>8} "
-      f"{'J1H-IN':>8} {'J1H-DIR':>8} "
-      f"{'J15M-OUT':>9} {'J1H-OUT':>8} "
-      f"{'J1H-RNG':>12} {'PnL':>9}")
-print("-"*104)
+print(f"\n{'LABEL':<14} {'OUTCOME':<8} "
+      f"{'90s':>9} {'5m':>9} {'10m':>9} "
+      f"{'15m':>9} {'30m':>9} {'45m':>9} "
+      f"{'60m':>9} {'FINAL':>10}")
+print("-"*110)
 
-for (close_utc, dur, sym, direction,
-     session, pnl, label) in TRADES:
+for (label, close_utc, dur, sym,
+     direction, entry_hint,
+     final_pnl, outcome) in TRADES:
 
     close_ts = to_ts(close_utc)
     entry_ts = close_ts - dur
-    warmup   = 3 * 3600
 
     try:
-        c15 = fetch_klines(
-            sym, "Min15",
-            entry_ts - warmup,
-            close_ts + 900)
-        c1h = fetch_klines(
-            sym, "Min60",
-            entry_ts - 6*3600,
-            close_ts + 3600)
+        # Min1 candles for fine
+        # checkpoint resolution,
+        # capped at min(duration, 1h)
+        window = min(dur, 3700)
+        c1m = fetch_klines(
+            sym, "Min1",
+            entry_ts,
+            entry_ts + window + 60)
     except Exception as e:
-        print(f"{label:<36} FETCH ERROR: {e}")
-        rows.append({
-            "label":label,"symbol":sym,
-            "direction":direction,
-            "session":session,"pnl":pnl,
-            "error":str(e)
-        })
+        print(f"{label:<14} FETCH ERROR: {e}")
         continue
 
-    j15 = calc_kdj(c15)
-    j1h_all = calc_kdj(c1h)
+    if not c1m:
+        print(f"{label:<14} NO CANDLES")
+        continue
 
-    # 1h J lookup
-    hmap = {}
-    for idx, c in enumerate(c1h):
-        hmap[c["t"]] = j1h_all[idx]
-    def gj1h(t):
-        h = (t//3600)*3600
-        if h in hmap: return hmap[h]
-        for d in [-3600,3600]:
-            if h+d in hmap:
-                return hmap[h+d]
-        return None
+    entry_price = entry_hint or c1m[0]["c"]
+    sz = (5000 * 5) / entry_price
 
-    # Entry candle
-    entry_c = [(c,j15[i])
-               for i,c in enumerate(c15)
-               if c["t"] >= entry_ts]
-    exit_c  = [(c,j15[i])
-               for i,c in enumerate(c15)
-               if c["t"] <= close_ts]
+    def pct_move(price):
+        if direction == "LONG":
+            return (price - entry_price) / entry_price * 100
+        else:
+            return (entry_price - price) / entry_price * 100
 
-    j15_in  = entry_c[0][1] if entry_c else None
-    j15_out = exit_c[-1][1] if exit_c  else None
-    j1h_in  = gj1h(entry_c[0][0]["t"]) if entry_c else None
-    j1h_out = gj1h(exit_c[-1][0]["t"]) if exit_c  else None
+    def dollar_pnl(price):
+        if direction == "LONG":
+            return (price - entry_price) * sz
+        else:
+            return (entry_price - price) * sz
 
-    # J1H during trade
-    j1h_dur = [
-        gj1h(c["t"])
-        for c,_ in entry_c
-        if gj1h(c["t"]) is not None
-    ]
-    jdir  = j1h_dir(j1h_dur)
-    jmin  = min(j1h_dur) if j1h_dur else None
-    jmax  = max(j1h_dur) if j1h_dur else None
+    row_vals = []
+    csv_row = {
+        "label": label,
+        "outcome": outcome,
+        "direction": direction,
+        "symbol": sym,
+        "final_pnl": final_pnl,
+    }
 
-    # Zone crossings on J15M
-    prev_z = None
-    crosses = []
-    for c,j in entry_c:
-        z = zone(j)
-        if prev_z and z != prev_z:
-            t_str = datetime.fromtimestamp(
-                c["t"],tz=timezone.utc
-            ).strftime("%H:%M")
-            crosses.append(
-                f"{t_str} {prev_z[0]}→{z[0]}")
-        prev_z = z
+    for cp_sec in CHECKPOINTS_SEC:
+        if cp_sec > dur:
+            row_vals.append("—")
+            csv_row[f"pct_{cp_sec}s"] = ""
+            csv_row[f"pnl_{cp_sec}s"] = ""
+            continue
+        target_ts = entry_ts + cp_sec
+        # Find the lowest (worst) price
+        # reached up to this checkpoint
+        candles_so_far = [
+            c for c in c1m
+            if c["t"] <= target_ts
+        ]
+        if not candles_so_far:
+            row_vals.append("—")
+            csv_row[f"pct_{cp_sec}s"] = ""
+            csv_row[f"pnl_{cp_sec}s"] = ""
+            continue
+        if direction == "LONG":
+            worst_price = min(
+                c["l"] for c in candles_so_far)
+        else:
+            worst_price = max(
+                c["h"] for c in candles_so_far)
+        pct = pct_move(worst_price)
+        pnl = dollar_pnl(worst_price)
+        row_vals.append(
+            f"{pct:+.2f}%/${pnl:+.0f}")
+        csv_row[f"pct_{cp_sec}s"] = round(pct,3)
+        csv_row[f"pnl_{cp_sec}s"] = round(pnl,2)
 
-    # Signal exhaustion point
-    se_time = None
-    se_j15  = None
-    se_pnl  = None
-    below50 = False
-    for c,j in entry_c:
-        entry_price = entry_c[0][0]["c"]
-        sz = (5000*5)/entry_price
-        cp = ((c["c"]-entry_price)*sz
-              if direction=="LONG"
-              else (entry_price-c["c"])*sz)
-        if j < 50: below50 = True
-        if (below50 and j >= 50
-                and se_time is None
-                and cp > 0
-                and direction == "LONG"):
-            se_time = datetime.fromtimestamp(
-                c["t"],tz=timezone.utc
-            ).strftime("%H:%M")
-            se_j15 = j
-            se_pnl = round(cp,2)
-        # For SHORT: J crossing below 50
-        if (direction == "SHORT"
-                and j > 50 and se_time is None):
-            above50_ref = True
-        elif (direction == "SHORT"
-                and j <= 50
-                and se_time is None
-                and cp > 0):
-            se_time = datetime.fromtimestamp(
-                c["t"],tz=timezone.utc
-            ).strftime("%H:%M")
-            se_j15 = j
-            se_pnl = round(cp,2)
+    print(f"{label:<14} {outcome:<8} " +
+          " ".join(f"{v:>9}" for v in row_vals) +
+          f" {final_pnl:>+10.2f}")
 
-    jrng = (f"{jmin:.0f}–{jmax:.0f}"
-            if jmin is not None else "—")
-    j15i = f"{j15_in:.1f}" if j15_in else "—"
-    j1hi = f"{j1h_in:.1f}" if j1h_in else "—"
-    j15o = f"{j15_out:.1f}" if j15_out else "—"
-    j1ho = f"{j1h_out:.1f}" if j1h_out else "—"
+    rows.append(csv_row)
 
-    print(f"{label:<36} {j15i:>8} "
-          f"{j1hi:>8} {jdir:>8} "
-          f"{j15o:>9} {j1ho:>8} "
-          f"{jrng:>12} {pnl:>+9.2f}")
-
-    if crosses:
-        print(f"  {'J15M crosses:':<14} "
-              f"{' | '.join(crosses[:6])}")
-    if se_time:
-        print(f"  {'SE fires:':<14} "
-              f"{se_time} J15M={se_j15} "
-              f"PnL={se_pnl:+.2f} "
-              f"(vs final {pnl:+.2f})")
-
-    rows.append({
-        "label":        label,
-        "symbol":       sym,
-        "direction":    direction,
-        "session":      session,
-        "pnl":          pnl,
-        "j15m_entry":   j15_in,
-        "j15m_entry_zone": zone(j15_in),
-        "j1h_entry":    j1h_in,
-        "j1h_entry_zone": zone(j1h_in),
-        "j15m_exit":    j15_out,
-        "j15m_exit_zone": zone(j15_out),
-        "j1h_exit":     j1h_out,
-        "j1h_exit_zone": zone(j1h_out),
-        "j1h_direction": jdir,
-        "j1h_min":      jmin,
-        "j1h_max":      jmax,
-        "j15m_crosses": " | ".join(crosses[:8]),
-        "se_time":      se_time or "",
-        "se_j15m":      se_j15 or "",
-        "se_pnl":       se_pnl or "",
-        "error":        "",
-    })
-
-# Write CSV
-fields = [
-    "label","symbol","direction",
-    "session","pnl",
-    "j15m_entry","j15m_entry_zone",
-    "j1h_entry","j1h_entry_zone",
-    "j15m_exit","j15m_exit_zone",
-    "j1h_exit","j1h_exit_zone",
-    "j1h_direction","j1h_min","j1h_max",
-    "j15m_crosses","se_time",
-    "se_j15m","se_pnl","error",
-]
-with open("sentinel_case.csv",
+fields = (["label","outcome","direction",
+           "symbol","final_pnl"] +
+          [f"pct_{c}s" for c in CHECKPOINTS_SEC] +
+          [f"pnl_{c}s" for c in CHECKPOINTS_SEC])
+with open("kill_threshold_data.csv",
           "w", newline="") as f:
-    w = csv.DictWriter(
-        f, fieldnames=fields,
-        extrasaction="ignore")
+    w = csv.DictWriter(f, fieldnames=fields,
+                        extrasaction="ignore")
     w.writeheader()
     w.writerows(rows)
 
-print(f"\nWrote sentinel_case.csv"
+print(f"\nWrote kill_threshold_data.csv"
       f" — {len(rows)} rows")

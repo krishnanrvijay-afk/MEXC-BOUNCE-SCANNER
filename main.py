@@ -114,6 +114,7 @@ class AppState:
         self.scan_snapshots:       dict              = {}  # symbol -> last 3 scan snapshots
         self.market_health:        dict              = {}
         self.price_stale:          dict[str, bool]   = {}  # symbols with stale price feed
+        self.price_updated_at:      dict[str, float]  = {}  # symbol -> unix timestamp of last successful price write
 
     @property
     def slots_used(self) -> int:
@@ -1233,6 +1234,7 @@ async def _price_loop():
             for sym, px in zip(PAIRS, results):
                 if isinstance(px, (int, float)) and px:
                     app_state.prices[sym] = float(px)
+                    app_state.price_updated_at[sym] = time.time()
 
             # NOTE: 24h price change fetch not implemented for MEXC.
             # mexc_client exposes no get_all_price_changes() or bulk ticker method.
@@ -1765,10 +1767,31 @@ async def _exit_monitor_loop():
                 tp1_hit   = trade.get("tp1_hit", False)
                 is_short  = direction == "SHORT"
 
+                _px_age = (
+                    time.time() -
+                    app_state.price_updated_at.get(sym, 0)
+                )
                 if not current or current <= 0:
                     print(f"[EXIT CHECK] {sym} {direction} skipped - "
                           f"no price ({current})")
                     continue
+                if _px_age > 90:
+                    print(f"[STALE PRICE] {sym} {direction} price age="
+                          f"{_px_age:.0f}s — attempting direct refetch")
+                    _fresh_px = None
+                    try:
+                        _fresh_px = await mexc_client.get_price(sym)
+                    except Exception as _refetch_e:
+                        print(f"[STALE PRICE] {sym} refetch failed: {_refetch_e!r}")
+                    if _fresh_px and _fresh_px > 0:
+                        app_state.prices[sym] = float(_fresh_px)
+                        app_state.price_updated_at[sym] = time.time()
+                        current = float(_fresh_px)
+                        print(f"[STALE PRICE] {sym} refetch succeeded: {current}")
+                    else:
+                        print(f"[STALE PRICE] {sym} refetch FAILED — price still stale, "
+                              f"exit checks proceeding with last-known price as fallback "
+                              f"rather than skipping entirely")
                 # Update excursion tracking regardless of sl_price
                 ep = trade.get("extreme_price") or current
                 trade["extreme_price"] = (min(ep, current) if is_short
@@ -2273,6 +2296,18 @@ async def _mexc_balance_loop():
         first = False
 
 
+async def _supervised(coro_fn, name: str):
+    """Runs coro_fn() forever. If it ever exits (crash or otherwise),
+    logs loudly and relaunches after a short delay, indefinitely."""
+    while True:
+        try:
+            await coro_fn()
+        except Exception as e:
+            print(f"[WATCHDOG] {name} task died: {e!r} — respawning in 2s")
+        else:
+            print(f"[WATCHDOG] {name} task exited cleanly (unexpected) — respawning in 2s")
+        await asyncio.sleep(2)
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global mexc_client
@@ -2302,11 +2337,11 @@ async def lifespan(app: FastAPI):
     else:
         print("[MODE] LIVE trading - AUTO-ENTRY ACTIVE. All signals will open live positions automatically. Confirm this is intentional.")
 
-    scan_task  = asyncio.create_task(_scan_loop())
-    price_task = asyncio.create_task(_price_loop())
-    exit_task  = asyncio.create_task(_exit_monitor_loop())
-    state_task   = asyncio.create_task(_state_heartbeat_loop())
-    balance_task = asyncio.create_task(_mexc_balance_loop())
+    scan_task    = asyncio.create_task(_supervised(_scan_loop,            "scan_loop"))
+    price_task   = asyncio.create_task(_supervised(_price_loop,           "price_loop"))
+    exit_task    = asyncio.create_task(_supervised(_exit_monitor_loop,    "exit_monitor_loop"))
+    state_task   = asyncio.create_task(_supervised(_state_heartbeat_loop, "state_heartbeat_loop"))
+    balance_task = asyncio.create_task(_supervised(_mexc_balance_loop,    "mexc_balance_loop"))
     if _digest_task is not None and not _digest_task.done():
         _digest_task.cancel()
     yield

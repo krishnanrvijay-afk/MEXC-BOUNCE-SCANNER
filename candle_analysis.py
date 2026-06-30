@@ -61,19 +61,16 @@ def fmt_ts(ts):
         ts, tz=timezone.utc
     ).strftime("%H:%M")
 
-# All four WIF_USDT trades June 29
+# Three WIF_USDT trades June 29-30
 TRADES = [
     ("WIF-1 ASIA WINNER",
-     "2026-06-29 05:17:14+00", 17190,
+     "2026-06-29 10:03:00+00", 17190,
      "LONG", 0.17500, 1200.00),
     ("WIF-2 US LOSER",
-     "2026-06-29 11:05:00+00", 3549,
+     "2026-06-29 15:05:00+00", 3549,
      "LONG", 0.18040, -554.32),
-    ("WIF-3 EU SHORT LOSER",
-     "2026-06-29 11:05:00+00", 14395,
-     "SHORT", None, -189.86),
-    ("WIF-4 LATE ASIA LOSER",
-     "2026-06-29 22:25:00+00", 13592,
+    ("WIF-3 LATE ASIA LOSER",
+     "2026-06-30 02:25:00+00", 13592,
      "LONG", None, -745.64),
 ]
 

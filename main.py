@@ -848,6 +848,16 @@ async def _do_open_trade(
 
     _client = mexc_client
     sl_price = alert_data.get("sl_price") if alert_data else None
+    # HC/HP 10x only on anchor pairs
+    _hc_anchor = {
+        "BTC", "ETH", "SOL",
+        "BTC_USDT", "ETH_USDT", "SOL_USDT"
+    }
+    if (alert_data and
+            alert_data.get("tier") == "HIGH_PROB" and
+            symbol not in _hc_anchor):
+        leverage = min(leverage,
+                       _scanner_mod.LEVERAGE_MID)
     result   = await _client.open_position(
         symbol, direction, margin_usdc, leverage, sl_price=sl_price
     )
@@ -1851,7 +1861,9 @@ async def _exit_monitor_loop():
                     "BTC", "ETH", "SOL",
                     "BTC_USDT", "ETH_USDT", "SOL_USDT"
                 }
-                if sym in _anchor_pairs:
+                _trade_tier = trade.get("tier", "REGULAR")
+                if (sym in _anchor_pairs and
+                        _trade_tier != "HIGH_PROB"):
                     _open_ts = trade.get("opened_at")
                     if _open_ts:
                         _elapsed = time.time() - _open_ts
@@ -1863,6 +1875,9 @@ async def _exit_monitor_loop():
                                   f"90min exceeded, exiting")
                             _do_close_trade(key, trade,
                                             current, "ANCHOR_TIME_EXIT")
+                            _scanner_mod.set_close_cooldown(
+                                sym, direction,
+                                _scanner_mod.KILL_COOLDOWN_SECONDS)
                             continue
 
                 # -- Peak PnL protection shadow (observation only, no exit logic) ----
@@ -2104,15 +2119,6 @@ async def _exit_monitor_loop():
                         _large_sl_cooldowns[f"{sym}{direction}"]     = _exp
                         print(f"[LARGE SL COOLDOWN] {sym} {direction} - SL ${abs(_sl_pnl):.2f} >= $100 threshold. 90 min cooldown applied.")
                     continue
-
-                # -- HC early partial close at 1.5R -> SL to breakeven ------------
-                if (trade.get("is_score10") and not trade.get("partial_hit")
-                        and trade.get("partial_price")):
-                    _pp     = trade["partial_price"]
-                    _pp_hit = (is_short and current <= _pp) or (not is_short and current >= _pp)
-                    if _pp_hit:
-                        _do_hc_partial_close(key, trade, current)
-                        continue
 
                 # -- TP1 (always checked first - partial close, half position) ----
                 if not tp1_hit and tp1_price:

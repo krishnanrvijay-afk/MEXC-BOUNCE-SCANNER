@@ -2,21 +2,19 @@ import requests, csv
 from datetime import datetime, timezone
 
 BASE = "https://contract.mexc.com/api/v1/contract/kline"
-SYMBOL = "WIF_USDT"
 
 def fetch_klines(symbol, interval,
                  start_ts, end_ts):
     r = requests.get(
         f"{BASE}/{symbol}",
-        params={
-            "interval": interval,
-            "start": start_ts,
-            "end": end_ts,
-        }, timeout=15)
+        params={"interval": interval,
+                "start": start_ts,
+                "end": end_ts},
+        timeout=15)
     r.raise_for_status()
     d = r.json()
     if not d.get("success"):
-        raise ValueError(str(d)[:150])
+        raise ValueError(str(d)[:120])
     raw = d["data"]
     out = []
     for i in range(len(raw["time"])):
@@ -43,169 +41,232 @@ def calc_kdj(candles, n=9):
     return result
 
 def zone(j):
-    if j is None: return "—"
     if j < 30: return "BEARISH"
     if j < 70: return "UNDECIDED"
     return "BULLISH"
 
-def j1h_dir(vals):
-    v = [x for x in vals if x is not None]
-    if len(v) < 2: return "FLAT"
-    d = v[-1] - v[0]
-    if d > 10:  return "RISING"
-    if d < -10: return "FALLING"
-    return "FLAT"
-
-def fmt_ts(ts):
+def fmt(ts):
     return datetime.fromtimestamp(
         ts, tz=timezone.utc
     ).strftime("%H:%M")
 
-# Three WIF_USDT trades June 29-30
-TRADES = [
-    ("WIF-1 ASIA WINNER",
-     "2026-06-29 10:03:00+00", 17190,
-     "LONG", 0.17500, 1200.00),
-    ("WIF-2 US LOSER",
-     "2026-06-29 15:05:00+00", 3549,
-     "LONG", 0.18040, -554.32),
-    ("WIF-3 LATE ASIA LOSER",
-     "2026-06-30 02:25:00+00", 13592,
-     "LONG", None, -745.64),
-]
+def pnl_usd(entry, close, direction,
+            margin=5000, lev=5):
+    sz = (margin * lev) / entry
+    return round(
+        (close-entry)*sz if direction=="LONG"
+        else (entry-close)*sz, 2)
 
-print(f"\n{'LABEL':<22} {'J15M-IN':>8} "
-      f"{'J1H-IN':>8} {'J1H-DIR':>8} "
-      f"{'J15M-OUT':>9} {'J1H-OUT':>8} "
-      f"{'J1H-RNG':>12} {'PnL':>10}")
-print("-"*100)
-
-rows = []
-
-for (label, close_utc, dur, direction,
-     entry_hint, pnl) in TRADES:
-
-    close_ts = int(datetime.fromisoformat(
-        close_utc.replace('+00','')
-    ).replace(tzinfo=timezone.utc).timestamp())
-    entry_ts = close_ts - dur
+def analyze(label, symbol, direction,
+            entry_ts, close_ts,
+            entry_hint=None):
     warmup = 3 * 3600
+    print(f"\n{'='*68}")
+    print(f"  {label}")
+    print(f"  {symbol} {direction}")
+    print(f"  Entry: {fmt(entry_ts)} UTC  "
+          f"Close: {fmt(close_ts)} UTC  "
+          f"Dur: {(close_ts-entry_ts)//60}m")
+    print(f"{'='*68}")
 
-    try:
-        c15 = fetch_klines(
-            SYMBOL, "Min15",
-            entry_ts - warmup,
-            close_ts + 900)
-        c1h = fetch_klines(
-            SYMBOL, "Min60",
-            entry_ts - 6*3600,
-            close_ts + 3600)
-    except Exception as e:
-        print(f"{label:<22} FETCH ERROR: {e}")
-        continue
+    c15 = fetch_klines(symbol, "Min15",
+        entry_ts-warmup, close_ts+900)
+    c1h = fetch_klines(symbol, "Min60",
+        entry_ts-6*3600, close_ts+3600)
 
     j15 = calc_kdj(c15)
     j1h_all = calc_kdj(c1h)
     hmap = {}
-    for idx, c in enumerate(c1h):
-        hmap[c["t"]] = j1h_all[idx]
+    for i,c in enumerate(c1h):
+        hmap[c["t"]] = j1h_all[i]
     def gj1h(t):
-        h = (t//3600)*3600
+        h=(t//3600)*3600
         if h in hmap: return hmap[h]
         for d in [-3600,3600]:
             if h+d in hmap: return hmap[h+d]
         return None
 
-    entry_c = [(c,j15[i]) for i,c in
-               enumerate(c15) if c["t"]>=entry_ts]
-    exit_c  = [(c,j15[i]) for i,c in
-               enumerate(c15) if c["t"]<=close_ts]
-
-    if not entry_c or not exit_c:
-        print(f"{label:<22} NO CANDLES IN WINDOW")
-        continue
+    entry_c = [(c,j15[i])
+               for i,c in enumerate(c15)
+               if c["t"]>=entry_ts]
+    exit_c  = [(c,j15[i])
+               for i,c in enumerate(c15)
+               if c["t"]<=close_ts]
+    if not entry_c: return
+    entry_px = entry_hint or entry_c[0][0]["c"]
+    exit_px  = exit_c[-1][0]["c"] if exit_c else None
 
     j15_in  = entry_c[0][1]
-    j15_out = exit_c[-1][1]
+    j15_out = exit_c[-1][1] if exit_c else None
     j1h_in  = gj1h(entry_c[0][0]["t"])
-    j1h_out = gj1h(exit_c[-1][0]["t"])
+    j1h_out = gj1h(exit_c[-1][0]["t"]) if exit_c else None
 
-    j1h_dur = [gj1h(c["t"]) for c,_ in entry_c
-               if c["t"]<=close_ts
-               and gj1h(c["t"]) is not None]
-    jdir = j1h_dir(j1h_dur)
-    jmin = min(j1h_dur) if j1h_dur else None
-    jmax = max(j1h_dur) if j1h_dur else None
+    j1h_vals = [gj1h(c["t"]) for c,_ in entry_c
+                if c["t"]<=close_ts
+                and gj1h(c["t"]) is not None]
+    j1h_dir = ("RISING" if len(j1h_vals)>=2 and
+                j1h_vals[-1]-j1h_vals[0]>10
+                else "FALLING" if len(j1h_vals)>=2 and
+                j1h_vals[-1]-j1h_vals[0]<-10
+                else "FLAT")
 
-    entry_price = entry_hint or entry_c[0][0]["c"]
+    print(f"  Entry px: {entry_px:.5f}  "
+          f"Exit px: {exit_px:.5f}")
+    print(f"  J15M: {j15_in:.1f}({zone(j15_in)[0]}) → "
+          f"{j15_out:.1f}({zone(j15_out)[0]})"
+          if j15_out else
+          f"  J15M entry: {j15_in:.1f}")
+    print(f"  J1H:  {j1h_in:.1f}({zone(j1h_in)[0]}) → "
+          f"{j1h_out:.1f}({zone(j1h_out)[0]}) [{j1h_dir}]"
+          if j1h_in and j1h_out else "")
 
+    # Signal Exhaustion simulation
+    se_ts = None
+    se_pnl = None
+    se_j15 = None
+    arm = False
     prev_z = None
-    crosses = []
+
+    print(f"\n  {'TIME':>6}  {'PRICE':>8}  "
+          f"{'J15M':>7}  {'ZONE':>9}  "
+          f"{'J1H':>6}  {'PnL':>9}  NOTE")
+    print(f"  {'-'*72}")
+
+    rows = []
     for c,j in entry_c:
         if c["t"] > close_ts: break
+        j1h = gj1h(c["t"])
+        p = pnl_usd(entry_px, c["c"], direction)
         z = zone(j)
-        if prev_z and z != prev_z:
-            sz = (5000*5)/entry_price
-            cp = ((c["c"]-entry_price)*sz
-                  if direction=="LONG"
-                  else (entry_price-c["c"])*sz)
-            crosses.append(
-                f"{fmt_ts(c['t'])} "
-                f"{prev_z[0]}→{z[0]} "
-                f"(${cp:+.0f})")
-        prev_z = z
 
-    jrng = (f"{jmin:.0f}–{jmax:.0f}"
-            if jmin is not None else "—")
+        # SE arming and fire
+        if direction=="LONG":
+            if j < 50: arm=True
+            se_fire=(arm and j>=50 and
+                     se_ts is None and p>0)
+        else:
+            if j > 50: arm=True
+            se_fire=(arm and j<=50 and
+                     se_ts is None and p>0)
 
-    print(f"{label:<22} {j15_in:>8.1f} "
-          f"{j1h_in or 0:>8.1f} {jdir:>8} "
-          f"{j15_out:>9.1f} {j1h_out or 0:>8.1f} "
-          f"{jrng:>12} {pnl:>+10.2f}")
+        note=""
+        if c["t"]==entry_c[0][0]["t"]:
+            note="ENTRY"
+        if se_fire:
+            se_ts=c["t"]; se_pnl=p; se_j15=j
+            note="SE⚡ WOULD FIRE"
 
-    if crosses:
-        print(f"  {'J15M crosses:':<16}"
-              f"{' | '.join(crosses)}")
+        # Zone crossings
+        if prev_z and z!=prev_z:
+            note=(note+" " if note else "")+(
+                f"{prev_z[0]}→{z[0]}")
+        prev_z=z
 
-    print(f"  {'Entry price:':<16}"
-          f"{entry_price:.5f}  "
-          f"{'Exit price:':<14}"
-          f"{exit_c[-1][0]['c']:.5f}")
+        if c["t"]>=entry_ts:
+            print(f"  {fmt(c['t']):>6}  "
+                  f"{c['c']:8.5f}  "
+                  f"{j:7.1f}  {z:>9}  "
+                  f"{j1h or 0:6.1f}  "
+                  f"{p:+9.2f}  {note}")
+            rows.append({
+                "time":fmt(c["t"]),
+                "price":c["c"],
+                "j15m":j,
+                "zone":z,
+                "j1h":j1h,
+                "pnl":p,
+                "note":note
+            })
 
-    rows.append({
-        "label": label,
-        "direction": direction,
-        "pnl": pnl,
-        "j15m_entry": j15_in,
-        "j15m_entry_zone": zone(j15_in),
-        "j1h_entry": j1h_in,
-        "j1h_entry_zone": zone(j1h_in),
-        "j15m_exit": j15_out,
-        "j15m_exit_zone": zone(j15_out),
-        "j1h_exit": j1h_out,
-        "j1h_exit_zone": zone(j1h_out),
-        "j1h_direction": jdir,
-        "j1h_min": jmin,
-        "j1h_max": jmax,
-        "entry_price": entry_price,
-        "exit_price": exit_c[-1][0]["c"],
-        "j15m_crosses": " | ".join(crosses),
-    })
-    print()
+    print(f"\n  J15M at entry: {j15_in:.1f} "
+          f"({zone(j15_in)})")
+    print(f"  J1H at entry:  "
+          f"{j1h_in:.1f} ({zone(j1h_in)})"
+          if j1h_in else "")
+    if se_ts:
+        print(f"  SE would fire: {fmt(se_ts)} "
+              f"J15M={se_j15:.1f} "
+              f"PnL=+${se_pnl:.2f}")
+        final_pnl = pnl_usd(
+            entry_px,
+            exit_c[-1][0]["c"] if exit_c else entry_px,
+            direction)
+        print(f"  Actual exit:   {fmt(close_ts)} "
+              f"PnL=${final_pnl:.2f}")
+        print(f"  SE vs actual:  "
+              f"${se_pnl-final_pnl:+.2f} delta")
+    else:
+        print("  SE never fired "
+              "(never in profit past 50)")
+    return rows
 
-fields = ["label","direction","pnl",
-    "j15m_entry","j15m_entry_zone",
-    "j1h_entry","j1h_entry_zone",
-    "j15m_exit","j15m_exit_zone",
-    "j1h_exit","j1h_exit_zone",
-    "j1h_direction","j1h_min","j1h_max",
-    "entry_price","exit_price",
-    "j15m_crosses"]
-with open("wif_all_trades.csv",
-          "w", newline="") as f:
-    w = csv.DictWriter(f, fieldnames=fields,
-                        extrasaction="ignore")
-    w.writeheader()
-    w.writerows(rows)
+# ── TRADE DEFINITIONS ─────────────────
+# All timestamps in UTC seconds
 
-print(f"Wrote wif_all_trades.csv — {len(rows)} rows")
+# Case 1: HYPE_USDT LONG US
+# Close 6/30 07:17 PM EDT = 23:17 UTC
+# Duration 23193s → entry ~16:51 UTC
+HYPE_CLOSE = int(datetime(
+    2026,6,30,23,17,0,
+    tzinfo=timezone.utc).timestamp())
+HYPE_ENTRY = HYPE_CLOSE - 23193
+
+# Case 2: ADA_USDT SHORT US (MEXC)
+# Close 6/30 07:04 PM EDT = 23:04 UTC
+# Duration 29954s → entry ~14:45 UTC
+ADA_CLOSE = int(datetime(
+    2026,6,30,23,4,0,
+    tzinfo=timezone.utc).timestamp())
+ADA_ENTRY = ADA_CLOSE - 29954
+
+# Case 3: WIF_USDT three KILL exits
+# All 6/30 8:20 PM / 8:58 PM / 9:05 PM
+# EDT = 7/1 00:20 / 00:58 / 01:05 UTC
+WIF1_CLOSE = int(datetime(
+    2026,7,1,0,20,0,
+    tzinfo=timezone.utc).timestamp())
+WIF1_ENTRY = WIF1_CLOSE - 355
+
+WIF2_CLOSE = int(datetime(
+    2026,7,1,0,58,0,
+    tzinfo=timezone.utc).timestamp())
+WIF2_ENTRY = WIF2_CLOSE - 371
+
+WIF3_CLOSE = int(datetime(
+    2026,7,1,1,5,0,
+    tzinfo=timezone.utc).timestamp())
+WIF3_ENTRY = WIF3_CLOSE - 467
+
+print("Fetching candles for 5 trades...")
+
+r1 = analyze(
+    "CASE 1 — HYPE_USDT LONG US "
+    "(PEAK_DECAY_20 at 0.24R, MFE 1.92R)",
+    "HYPE_USDT", "LONG",
+    HYPE_ENTRY, HYPE_CLOSE)
+
+r2 = analyze(
+    "CASE 2 — ADA_USDT SHORT US "
+    "(MFE 1.17R → reversed to KILL -$116)",
+    "ADA_USDT", "SHORT",
+    ADA_ENTRY, ADA_CLOSE)
+
+r3 = analyze(
+    "CASE 3a — WIF_USDT LONG ASIA KILL 1 "
+    "(355s, -$105)",
+    "WIF_USDT", "LONG",
+    WIF1_ENTRY, WIF1_CLOSE)
+
+r4 = analyze(
+    "CASE 3b — WIF_USDT LONG ASIA KILL 2 "
+    "(371s, -$105)",
+    "WIF_USDT", "LONG",
+    WIF2_ENTRY, WIF2_CLOSE)
+
+r5 = analyze(
+    "CASE 3c — WIF_USDT LONG ASIA KILL 3 "
+    "(467s, -$108)",
+    "WIF_USDT", "LONG",
+    WIF3_ENTRY, WIF3_CLOSE)
+
+print("\nDone.")

@@ -164,4 +164,3 @@ SE_J1H_DECAY_PTS: float = 10.0
 # Tighter than the floor because
 # time without recovery is itself
 # a signal.
-

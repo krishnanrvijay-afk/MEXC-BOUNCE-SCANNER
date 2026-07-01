@@ -661,6 +661,7 @@ async def run_full_scan(client, market_health: Optional[dict] = None) -> list[di
                 _j1h_prev
                 if _j1h_prev is not None
                 else j1h, 2),
+                    "j1h_prev_valid": (_j1h_prev is not None),
                     "j5m":          round(j5m, 2),
                     "rsi15m":       round(rsi15m, 2),
                     "stoch_k":      round(stoch_k, 2),

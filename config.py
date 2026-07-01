@@ -154,6 +154,11 @@ KILL_PCT_FLOOR: float = 0.006
 # 0.6% adverse from entry, checked
 # every scan, any time elapsed.
 KILL_PCT_5MIN: float = 0.004
+SE_J1H_DECAY_PTS: float = 10.0
+# J1H decay threshold for Signal Exhaustion.
+# LONG: SE fires when J1H drops 10+ pts below peak.
+# SHORT: SE fires when J1H rises 10+ pts above trough.
+# Evidence: June 29 39-trade analysis + June 30 HYPE/ADA confirmation.
 # 0.4% adverse from entry, checked
 # once trade has been open >= 300s.
 # Tighter than the floor because

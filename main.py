@@ -1257,9 +1257,18 @@ async def _scan_loop():
                         (dir_ == "SHORT" and _j1h_now < _j1h_was))
                     if not _j1h_ok:
                         print(
-                            f"[CONFIRM GATE] {sym} {dir_} J1H direction wrong"
-                            f" — j1h={_j1h_now:.1f} prev={_j1h_was:.1f}"
-                            f" — discarded")
+                            f"[CONFIRM GATE] "
+                            f"{sym} {dir_} J1H "
+                            f"direction wrong -- "
+                            f"j1h={_j1h_now:.1f} "
+                            f"prev={_j1h_was:.1f}"
+                            f" -- discarded")
+                        asyncio.create_task(
+                            _log_alert_outcome(
+                                alert,
+                                "J1H_DISCARDED",
+                                "MEXC",
+                            ))
                         continue
                     # PRICE CONFIRMATION — add to pending, wait for be_confirm_price
                     _ep = alert.get("entry_price", 0) or 0
@@ -2374,6 +2383,70 @@ async def _supervised(coro_fn, name: str):
         await asyncio.sleep(2)
 
 
+async def _log_alert_outcome(
+        alert: dict,
+        outcome: str,
+        venue: str,
+        pending_duration_seconds:
+            int = 0,
+        confirm_price: float = None):
+    """Write one row to alert_log
+    table for every alert outcome:
+    J1H_DISCARDED, EXPIRED_AGE,
+    EXPIRED_J15M, EXPIRED_PRICE,
+    CONFIRMED. Best-effort -- never
+    raises, never blocks scan loop.
+    """
+    try:
+        _sb = _get_supabase()
+        if _sb is None:
+            return
+        _row = {
+            "venue":
+                venue,
+            "pair":
+                alert.get("symbol"),
+            "direction":
+                alert.get("direction"),
+            "signal_price":
+                alert.get(
+                    "entry_price"),
+            "be_confirm_price":
+                alert.get(
+                    "be_confirm_price"),
+            "j1h_at_signal":
+                alert.get("j1h"),
+            "j1h_prev_at_signal":
+                alert.get("j1h_prev"),
+            "j1h_prev_valid":
+                alert.get(
+                    "j1h_prev_valid",
+                    True),
+            "outcome":
+                outcome,
+            "pending_duration_seconds":
+                pending_duration_seconds,
+            "confirm_price":
+                confirm_price,
+            "session":
+                alert.get("session"),
+            "tier":
+                alert.get("tier"),
+            "score":
+                alert.get("score"),
+            "adx":
+                alert.get("adx1h"),
+            "j15m_at_signal":
+                alert.get("j15m"),
+        }
+        _sb.table("alert_log")\
+           .insert(_row)\
+           .execute()
+    except Exception as _e:
+        print(f"[ALERT LOG] write "
+              f"failed: {_e}")
+
+
 async def _process_pending_alerts():
     """Called each scan cycle. Checks pending alerts for expiry or price
     confirmation. Expiry thresholds reuse data-derived staleness values:
@@ -2405,12 +2478,24 @@ async def _process_pending_alerts():
         # Expiry — data-derived thresholds (mirrors /api/state staleness)
         _expired = _age > 480 or _j15m_drift > 30 or _p_drift > 1.5
         if _expired:
-            reason = (
-                f"age={_age}s"                  if _age > 480        else
-                f"j15m_drift={_j15m_drift:.1f}" if _j15m_drift > 30  else
-                f"p_drift={_p_drift:.2f}%"
-            )
-            print(f"[PENDING EXPIRED] {_sym} {_dir} reason={reason}")
+            _exp_reason = (
+                "EXPIRED_AGE"
+                if _age > 480
+                else "EXPIRED_J15M"
+                if _j15m_drift > 30
+                else "EXPIRED_PRICE")
+            print(
+                f"[PENDING EXPIRED] "
+                f"{_sym} {_dir} "
+                f"reason={_exp_reason}")
+            asyncio.create_task(
+                _log_alert_outcome(
+                    _alert,
+                    _exp_reason,
+                    "MEXC",
+                    pending_duration_seconds
+                        =_age,
+                ))
             _to_remove.append(_pk)
             continue
 
@@ -2439,6 +2524,15 @@ async def _process_pending_alerts():
                     f" pending_age={_age}s")
             elif err:
                 print(f"[CONFIRMED] {_sym} {_dir} open failed: {err}")
+            asyncio.create_task(
+                _log_alert_outcome(
+                    _alert,
+                    "CONFIRMED",
+                    "MEXC",
+                    pending_duration_seconds
+                        =_age,
+                    confirm_price=_cur,
+                ))
             _to_remove.append(_pk)
 
     for _pk in _to_remove:

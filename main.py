@@ -2241,19 +2241,6 @@ async def _exit_monitor_loop():
                         app_state.open_trades[key]["trail_stop_price"] = round(_trail_stop, 6)
                         print(f"[TRAIL] {sym} {direction} best={_best} stop={round(_trail_stop,6)} current={current}")
 
-                # HC trailing SL after tp1_hit: lock 1.5R minimum profit
-                if trade.get("is_score10") and tp1_hit:
-                    _sl_d = trade.get("sl_dist") or 0
-                    if _sl_d > 0:
-                        _ent   = trade["entry_price"]
-                        _lock  = (_ent + 1.5 * _sl_d if not is_short else _ent - 1.5 * _sl_d)
-                        _ep    = trade.get("extreme_price") or current
-                        _trail = (_ep - 2.0 * _sl_d if not is_short else _ep + 2.0 * _sl_d)
-                        _nsl   = (max(_lock, _trail) if not is_short else min(_lock, _trail))
-                        if sl_price and ((not is_short and _nsl > sl_price) or
-                                        (is_short and _nsl < sl_price)):
-                            trade["sl_price"] = round(_nsl, 6)
-                            app_state.open_trades[key]["sl_price"] = round(_nsl, 6)
 
                 # No exit this cycle
                 _trail_info = (f" trail_best={trade.get('trail_best_price')} trail_stop={trade.get('trail_stop_price')}"

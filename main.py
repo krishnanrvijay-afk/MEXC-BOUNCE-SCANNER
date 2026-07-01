@@ -2908,6 +2908,8 @@ async def get_settings():
             _scanner_mod.J1H_SHORT_MIN,
         "j1h_short_max":
             _scanner_mod.J1H_SHORT_MAX,
+        "j1h_long_max":
+            _scanner_mod.J1H_LONG_MAX,
         "atr_sl_multiplier":
             _scanner_mod.ATR_SL_MULTIPLIER,
         "tp1_close_pct":
@@ -2960,6 +2962,9 @@ async def post_settings(request: Request):
     if "j1h_short_max" in body:
         _scanner_mod.J1H_SHORT_MAX = float(
             body["j1h_short_max"])
+    if "j1h_long_max" in body:
+        _scanner_mod.J1H_LONG_MAX = float(
+            body["j1h_long_max"])
     if "atr_sl_multiplier" in body:
         _scanner_mod.ATR_SL_MULTIPLIER = float(
             body["atr_sl_multiplier"])
@@ -3014,6 +3019,8 @@ async def post_settings(request: Request):
                     _scanner_mod.J1H_SHORT_MIN,
                 "j1h_short_max":
                     _scanner_mod.J1H_SHORT_MAX,
+                "j1h_long_max":
+                    _scanner_mod.J1H_LONG_MAX,
                 "atr_sl_multiplier":
                     _scanner_mod.ATR_SL_MULTIPLIER,
                 "tp1_close_pct":

@@ -360,74 +360,6 @@ def _load_state():
             return
         data = result.data[0]
 
-        # -- New-day check ------------------------------------------------------
-        today_str = datetime.now(ET).strftime("%Y-%m-%d")
-        if data.get("saved_date") != today_str:
-            saved = data.get("saved_date", "unknown")
-            print(f"[DAILY RESET] New trading day ({saved} -> {today_str}) - P&L reset to $0")
-            daily_pnl              = 0.0
-            trading_halted_today   = False
-            consecutive_losses     = 0
-            circuit_breaker_active = False
-            _save_state()
-            return
-
-        # -- Restore globals ----------------------------------------------------
-        daily_pnl              = float(data.get("daily_pnl") or 0)
-        trading_halted_today   = bool(data.get("trading_halted_today", False))
-        consecutive_losses     = int(data.get("consecutive_losses") or 0)
-        circuit_breaker_active = bool(data.get("circuit_breaker_active", False))
-        app_state.margin_deployed = float(data.get("margin_deployed") or 0)
-
-        # -- Restore open trades ------------------------------------------------
-        for key, trade in (data.get("open_trades") or {}).items():
-            app_state.open_trades[key] = trade
-            print(f"[RESTORE] {trade.get('symbol')} {trade.get('direction')} "
-                  f"entry={trade.get('entry_price')} sl={trade.get('sl_price')} "
-                  f"tp1={trade.get('tp1_price')} restored")
-
-        # -- Sanitize foreign-scanner ghost positions ----------------------------
-        _foreign_keys = [
-            k for k, t in list(app_state.open_trades.items())
-            if t.get("symbol") not in PAIRS
-        ]
-        for _fk in _foreign_keys:
-            _ft = app_state.open_trades.pop(_fk)
-            print(f"[SANITIZE] dropped foreign position {_ft.get('symbol')}")
-        if _foreign_keys:
-            print(f"[SANITIZE] {len(_foreign_keys)} foreign position(s) removed")
-
-        # -- Restore shadow dicts (peak + adverse) ----------------------------
-        for key, sh in (data.get("peak_shadow") or {}).items():
-            if key in app_state.open_trades:
-                _peak_shadow[key] = sh
-        for key, sh in (data.get("adverse_shadow") or {}).items():
-            if key in app_state.open_trades:
-                _adverse_shadow[key] = sh
-        for key, sh in (data.get("signal_shadow") or {}).items():
-            if key in app_state.open_trades:
-                _signal_shadow[key] = sh
-        print(f"[RESTORE] shadow dicts -- peak={len(_peak_shadow)} adverse={len(_adverse_shadow)}" + f" signal={len(_signal_shadow)}")
-
-
-        # -- Sanitize phantom trade-log entries (null/zero exit_price or |R| > 10) --
-        _keep_log = []
-        _drop_log  = []
-        for _e in app_state.trade_log:
-            _ep = _e.get("exit_price") or 0
-            _rv = abs(_e.get("r_value") or 0)
-            if _ep > 0 and _rv <= 10:
-                _keep_log.append(_e)
-            else:
-                _drop_log.append(_e)
-        for _ph in _drop_log:
-            print(f"[SANITIZE] dropped phantom trade {_ph.get('symbol')} {_ph.get('direction')} "
-                  f"pnl={_ph.get('pnl_usd')} r={_ph.get('r_value')} exit_price={_ph.get('exit_price')}")
-        if _drop_log:
-            app_state.trade_log = _keep_log
-            print(f"[SANITIZE] {len(_drop_log)} phantom trade(s) removed from restored log")
-            _save_state()
-
         # Ã¢ÂÂÃ¢ÂÂ Restore settings from Supabase
         if data.get("paper_mode") is not None:
             PAPER_MODE = bool(data["paper_mode"])
@@ -509,6 +441,74 @@ def _load_state():
                 .KILL_PCT_5MIN = \
                 float(data[
                     "kill_pct_5min"])
+
+        # -- New-day check ------------------------------------------------------
+        today_str = datetime.now(ET).strftime("%Y-%m-%d")
+        if data.get("saved_date") != today_str:
+            saved = data.get("saved_date", "unknown")
+            print(f"[DAILY RESET] New trading day ({saved} -> {today_str}) - P&L reset to $0")
+            daily_pnl              = 0.0
+            trading_halted_today   = False
+            consecutive_losses     = 0
+            circuit_breaker_active = False
+            _save_state()
+            return
+
+        # -- Restore globals ----------------------------------------------------
+        daily_pnl              = float(data.get("daily_pnl") or 0)
+        trading_halted_today   = bool(data.get("trading_halted_today", False))
+        consecutive_losses     = int(data.get("consecutive_losses") or 0)
+        circuit_breaker_active = bool(data.get("circuit_breaker_active", False))
+        app_state.margin_deployed = float(data.get("margin_deployed") or 0)
+
+        # -- Restore open trades ------------------------------------------------
+        for key, trade in (data.get("open_trades") or {}).items():
+            app_state.open_trades[key] = trade
+            print(f"[RESTORE] {trade.get('symbol')} {trade.get('direction')} "
+                  f"entry={trade.get('entry_price')} sl={trade.get('sl_price')} "
+                  f"tp1={trade.get('tp1_price')} restored")
+
+        # -- Sanitize foreign-scanner ghost positions ----------------------------
+        _foreign_keys = [
+            k for k, t in list(app_state.open_trades.items())
+            if t.get("symbol") not in PAIRS
+        ]
+        for _fk in _foreign_keys:
+            _ft = app_state.open_trades.pop(_fk)
+            print(f"[SANITIZE] dropped foreign position {_ft.get('symbol')}")
+        if _foreign_keys:
+            print(f"[SANITIZE] {len(_foreign_keys)} foreign position(s) removed")
+
+        # -- Restore shadow dicts (peak + adverse) ----------------------------
+        for key, sh in (data.get("peak_shadow") or {}).items():
+            if key in app_state.open_trades:
+                _peak_shadow[key] = sh
+        for key, sh in (data.get("adverse_shadow") or {}).items():
+            if key in app_state.open_trades:
+                _adverse_shadow[key] = sh
+        for key, sh in (data.get("signal_shadow") or {}).items():
+            if key in app_state.open_trades:
+                _signal_shadow[key] = sh
+        print(f"[RESTORE] shadow dicts -- peak={len(_peak_shadow)} adverse={len(_adverse_shadow)}" + f" signal={len(_signal_shadow)}")
+
+
+        # -- Sanitize phantom trade-log entries (null/zero exit_price or |R| > 10) --
+        _keep_log = []
+        _drop_log  = []
+        for _e in app_state.trade_log:
+            _ep = _e.get("exit_price") or 0
+            _rv = abs(_e.get("r_value") or 0)
+            if _ep > 0 and _rv <= 10:
+                _keep_log.append(_e)
+            else:
+                _drop_log.append(_e)
+        for _ph in _drop_log:
+            print(f"[SANITIZE] dropped phantom trade {_ph.get('symbol')} {_ph.get('direction')} "
+                  f"pnl={_ph.get('pnl_usd')} r={_ph.get('r_value')} exit_price={_ph.get('exit_price')}")
+        if _drop_log:
+            app_state.trade_log = _keep_log
+            print(f"[SANITIZE] {len(_drop_log)} phantom trade(s) removed from restored log")
+            _save_state()
         print(f"[RESTORE] settings restored "
               f"from Supabase")
 

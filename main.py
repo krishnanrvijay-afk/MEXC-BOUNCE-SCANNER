@@ -65,6 +65,7 @@ _adverse_shadow: dict = {}  # trade_key -> adverse-cut shadow state (observation
 _sign_shadow:   dict = {}  # trade_key -> PnL-sign transition history (observation only)
 _signal_shadow: dict = {}  # trade_key -> signal invalidation shadow state (observation only)
 _signal_exhaustion_armed: dict = {}  # (key + "_se_armed") -> bool; SE arming state per trade
+_se_j1h_extreme: dict = {}  # key -> best J1H while cpnl > 0; LONGs: highest, SHORTs: lowest
 
 # -- Per-pair adverse dollar cut thresholds ------------------------------------
 # If adverse PnL <= -threshold AND max favourable excursion < $10, cut immediately.
@@ -1614,6 +1615,7 @@ def _do_close_trade(key: str, trade: dict, exit_price: float, reason: str):
             except Exception as _unlock_e:
                 print(f"[LOCK CLEANUP FAILED] {_lk}: {_unlock_e}")
     _signal_exhaustion_armed.pop(key + "_se_armed", None)
+    _se_j1h_extreme.pop(key, None)
     _save_state()
 
 
@@ -2174,39 +2176,48 @@ async def _exit_monitor_loop():
                                   current, reason)
                               continue
 
-                # Signal exhaustion -- exit when J15M condition that justified
-                # entry has resolved, while in profit. Evidence: 39-trade June
-                # 29 analysis + 20-trade archive. Net benefit +$1,504 / 20 trades.
-                _cur_j15m = None
+                # Signal Exhaustion -- exit when J1H turns against the trade
+                # while in profit. Tracks J1H peak (LONG) or trough (SHORT)
+                # and fires on SE_J1H_DECAY_PTS decay. Evidence: June 29
+                # 39-trade analysis + June 30 HYPE/ADA candle confirmation.
+                # Replaces the incorrect J15M-based version (built in error).
+                _cur_j1h = None
                 for _ps in app_state.pair_states:
                     if _ps.get("symbol") == sym:
-                        _cur_j15m = _ps.get("j15m")
+                        _cur_j1h = _ps.get("j1h")
                         break
-                if _cur_j15m is not None and _cpnl > 0:
-                    _se_key = key + "_se_armed"
+                if _cur_j1h is not None and _cpnl > 0:
                     if not is_short:
-                        # LONG: arm when J15M below 50, fire when crosses back above 50
-                        if _cur_j15m < 50:
-                            _signal_exhaustion_armed[_se_key] = True
-                        if (_signal_exhaustion_armed.get(_se_key) and
-                                _cur_j15m >= 50):
+                        # LONG: track J1H peak, fire when decays SE_J1H_DECAY_PTS+
+                        _prev = _se_j1h_extreme.get(key, _cur_j1h)
+                        _se_j1h_extreme[key] = max(_prev, _cur_j1h)
+                        _j1h_decay = _se_j1h_extreme[key] - _cur_j1h
+                        if _j1h_decay >= _scanner_mod.SE_J1H_DECAY_PTS:
                             print(f"[SIGNAL_EXHAUSTION] MEXC {sym} {direction}"
-                                  f" j15m={_cur_j15m:.1f} cpnl={_cpnl:.2f}")
+                                  f" j1h_peak={_se_j1h_extreme[key]:.1f}"
+                                  f" j1h_now={_cur_j1h:.1f}"
+                                  f" decay={_j1h_decay:.1f}"
+                                  f" cpnl={_cpnl:.2f}")
                             _do_close_trade(
                                 key, trade, current, "SIGNAL_EXHAUSTION")
-                            _signal_exhaustion_armed.pop(_se_key, None)
+                            _se_j1h_extreme.pop(key, None)
+                            _signal_exhaustion_armed.pop(key + "_se_armed", None)
                             continue
                     else:
-                        # SHORT: arm when J15M above 50, fire when crosses back below 50
-                        if _cur_j15m > 50:
-                            _signal_exhaustion_armed[_se_key] = True
-                        if (_signal_exhaustion_armed.get(_se_key) and
-                                _cur_j15m <= 50):
+                        # SHORT: track J1H trough, fire when rises SE_J1H_DECAY_PTS+
+                        _prev = _se_j1h_extreme.get(key, _cur_j1h)
+                        _se_j1h_extreme[key] = min(_prev, _cur_j1h)
+                        _j1h_rise = _cur_j1h - _se_j1h_extreme[key]
+                        if _j1h_rise >= _scanner_mod.SE_J1H_DECAY_PTS:
                             print(f"[SIGNAL_EXHAUSTION] MEXC {sym} {direction}"
-                                  f" j15m={_cur_j15m:.1f} cpnl={_cpnl:.2f}")
+                                  f" j1h_trough={_se_j1h_extreme[key]:.1f}"
+                                  f" j1h_now={_cur_j1h:.1f}"
+                                  f" rise={_j1h_rise:.1f}"
+                                  f" cpnl={_cpnl:.2f}")
                             _do_close_trade(
                                 key, trade, current, "SIGNAL_EXHAUSTION")
-                            _signal_exhaustion_armed.pop(_se_key, None)
+                            _se_j1h_extreme.pop(key, None)
+                            _signal_exhaustion_armed.pop(key + "_se_armed", None)
                             continue
                 # -- TRAILBLAZER: ATR trailing stop after tp1_hit --------------
                 if tp1_hit:

@@ -1913,7 +1913,14 @@ async def _exit_monitor_loop():
                     "entry_price")
                 _confirm_px = trade.get(
                     "be_confirm_price")
-                if _confirm_px and _entry_px_cr:
+                _cr_age = (
+                    int(time.time())
+                    - trade.get(
+                        "opened_at",
+                        int(time.time())))
+                if (_confirm_px and
+                        _entry_px_cr and
+                        _cr_age >= 30):
                     _confirm_broken = (
                         (not is_short and
                          current <= _entry_px_cr)
@@ -1926,6 +1933,7 @@ async def _exit_monitor_loop():
                             f" {sym} {direction}"
                             f" price={current}"
                             f" entry={_entry_px_cr}"
+                            f" age={_cr_age}s"
                             f" — exiting")
                         _do_close_trade(
                             key, trade,

@@ -1,282 +1,224 @@
 import requests
 from datetime import datetime, timezone
 
-BASE = "https://contract.mexc.com/api/v1/contract/kline"
+BASE = (
+  "https://contract.mexc.com"
+  "/api/v1/contract/kline")
 
 def fetch_klines(symbol, interval,
                  start, end):
     r = requests.get(
         f"{BASE}/{symbol}",
-        params={"interval": interval,
-                "start": start,
-                "end": end},
+        params={
+          "interval": interval,
+          "start": start,
+          "end": end},
         timeout=15)
     r.raise_for_status()
     d = r.json()
     if not d.get("success"):
-        raise ValueError(str(d)[:120])
+        raise ValueError(
+            str(d)[:120])
     raw = d["data"]
     out = []
-    for i in range(len(raw["time"])):
+    for i in range(
+            len(raw["time"])):
         out.append({
-            "t": int(raw["time"][i]),
-            "c": float(raw["close"][i]),
-            "h": float(raw["high"][i]),
-            "l": float(raw["low"][i]),
+          "t": int(raw["time"][i]),
+          "o": float(
+            raw["open"][i]),
+          "h": float(
+            raw["high"][i]),
+          "l": float(
+            raw["low"][i]),
+          "c": float(
+            raw["close"][i]),
         })
-    return sorted(out, key=lambda x: x["t"])
+    return sorted(
+        out, key=lambda x: x["t"])
 
 def calc_kdj(candles, n=9):
     K, D = 50.0, 50.0
     result = []
     for i, c in enumerate(candles):
-        w = candles[max(0,i-n+1):i+1]
-        hi = max(x["h"] for x in w)
-        lo = min(x["l"] for x in w)
+        w = candles[
+            max(0,i-n+1):i+1]
+        hi = max(
+            x["h"] for x in w)
+        lo = min(
+            x["l"] for x in w)
         rng = hi - lo
         rsv = ((c["c"]-lo)/rng*100
-               if rng > 0 else 50.0)
+               if rng>0 else 50.0)
         K = (2/3)*K + (1/3)*rsv
         D = (2/3)*D + (1/3)*K
-        result.append(round(3*K-2*D, 2))
+        result.append(
+            round(3*K-2*D, 2))
     return result
 
 def fmt(ts):
     return datetime.fromtimestamp(
         ts, tz=timezone.utc
-    ).strftime("%H:%M")
+    ).strftime("%H:%M:%S")
 
-def analyze(label, symbol, direction,
-            entry_ts, close_ts,
-            j1h_entry, loss_dollars):
-    warmup15 = 3 * 3600
-    warmup1h = 6 * 3600
+def analyze(label, symbol,
+            direction, entry_ts,
+            close_ts, confirm_px,
+            entry_px, duration_s):
+    # Use Min1 for trades
+    # under 5 minutes
+    interval = (
+        "Min1"
+        if duration_s < 300
+        else "Min15")
+    warmup = 1800
+    candles = fetch_klines(
+        symbol, interval,
+        entry_ts - warmup,
+        close_ts + 300)
+    j_vals = calc_kdj(candles)
 
-    # J15M for intra-trade momentum
-    c15 = fetch_klines(symbol, "Min15",
-        entry_ts - warmup15,
-        close_ts + 900)
-    j15_vals = calc_kdj(c15)
-
-    # J1H for background context only
-    c1h = fetch_klines(symbol, "Min60",
-        entry_ts - warmup1h,
-        close_ts + 3600)
-    j1h_vals = calc_kdj(c1h)
-
-    # build J1H lookup by hour
-    j1h_map = {}
-    for i, c in enumerate(c1h):
-        j1h_map[c["t"]] = j1h_vals[i]
-
-    def get_j1h(t):
-        h = (t // 3600) * 3600
-        for delta in [0, -3600, 3600]:
-            if h + delta in j1h_map:
-                return j1h_map[h+delta]
-        return None
-
-    # trade candles
     trade_c = [
-        (c, j15_vals[i])
-        for i, c in enumerate(c15)
+        (c, j_vals[i])
+        for i, c in enumerate(
+            candles)
         if c["t"] >= entry_ts
-        and c["t"] <= close_ts
-    ]
+        and c["t"] <= close_ts+120]
 
     if not trade_c:
-        print(f"\n{label}: no candles")
+        print(f"\n{label}: "
+              f"no candles")
         return
 
-    # derive entry price from first
-    # candle at or after entry_ts
-    entry_price = trade_c[0][0]["c"]
-
-    # tracking state
-    j15_peak = None
-    j15_peak_time = None
-    j15_at_cross = None
-    decay_at_cross = None
-    ever_profitable = False
-    se_would_fire_ts = None
-    se_would_fire_pnl = None
-
-    print(f"\n{'='*68}")
+    print(f"\n{'='*60}")
     print(f"  {label}")
-    print(f"  {symbol} {direction}  "
-          f"j1h_entry={j1h_entry:.1f}  "
-          f"loss=${loss_dollars}")
-    print(f"  Entry: {fmt(entry_ts)} UTC  "
-          f"Close: {fmt(close_ts)} UTC  "
-          f"Dur: "
-          f"{(close_ts-entry_ts)//60}m")
-    print(f"  Entry price (1st candle): "
-          f"{entry_price:.5f}")
-    print(f"{'='*68}")
-    print(f"  {'TIME':>5}  {'PRICE':>9}  "
-          f"{'J15M':>7}  {'PEAK':>7}  "
-          f"{'DECAY':>7}  "
-          f"{'J1H':>6}  NOTE")
-    print(f"  {'-'*64}")
+    print(f"  {symbol} {direction}"
+          f"  dur={duration_s}s"
+          f"  interval={interval}")
+    print(f"  confirm_px={confirm_px}"
+          f"  entry_px={entry_px}")
+    print(f"{'='*60}")
+    print(f"  {'TIME':>8}  "
+          f"{'O':>9}  "
+          f"{'H':>9}  "
+          f"{'L':>9}  "
+          f"{'C':>9}  "
+          f"{'J':>7}  NOTE")
+    print(f"  {'-'*68}")
 
-    for c, j15 in trade_c:
-        j1h = get_j1h(c["t"])
-        sz = 1000.0 / entry_price
-        cpnl = ((c["c"] - entry_price)
-                * sz
-                if direction == "LONG"
-                else
-                (entry_price - c["c"])
-                * sz)
-
-        if cpnl > 0:
-            ever_profitable = True
-
-        # track J15M peak (LONG) or
-        # trough (SHORT)
-        if direction == "LONG":
-            if (j15_peak is None or
-                    j15 > j15_peak):
-                j15_peak = j15
-                j15_peak_time = c["t"]
-            decay = (j15_peak - j15
-                     if j15_peak else 0)
-            price_adverse = (
-                c["c"] < entry_price)
-        else:
-            if (j15_peak is None or
-                    j15 < j15_peak):
-                j15_peak = j15
-                j15_peak_time = c["t"]
-            decay = (j15 - j15_peak
-                     if j15_peak else 0)
-            price_adverse = (
-                c["c"] > entry_price)
-
-        # when did price cross back
-        # through entry
-        if (price_adverse and
-                j15_at_cross is None
-                and ever_profitable):
-            j15_at_cross = j15
-            decay_at_cross = decay
-
-        # SE fire simulation —
-        # current: cpnl > 0 AND
-        # decay >= 10
-        # proposed: ever_profitable
-        # AND decay >= threshold
-        se_current = (cpnl > 0 and
-                      decay >= 10)
-        se_proposed = (ever_profitable
-                       and decay >= 10)
-
+    for c, j in trade_c:
         note = ""
-        if c["t"] == trade_c[0][0]["t"]:
-            note = "ENTRY"
-        if (j15_peak_time and
-                c["t"] == j15_peak_time
-                and note == ""):
-            note = "J15M PEAK"
-        if (price_adverse and
-                j15_at_cross == j15
-                and decay_at_cross == decay
-                and not note):
-            note = "PRICE→NEGATIVE"
-        if (se_would_fire_ts is None
-                and se_proposed
-                and not se_current):
-            se_would_fire_ts = c["t"]
-            se_would_fire_pnl = cpnl
-            note = "SE★PROPOSED FIRES"
-        elif (se_would_fire_ts is None
-              and se_current):
-            se_would_fire_ts = c["t"]
-            se_would_fire_pnl = cpnl
-            note = "SE CURRENT FIRES"
+        if c["t"] <= (
+                entry_ts + 60):
+            note = "ENTRY WINDOW"
+        # Check if candle crossed
+        # back through confirm_px
+        if direction == "LONG":
+            if c["l"] <= confirm_px:
+                note = (
+                    "\u26a1 CONFIRM BREAK"
+                    f" lo={c['l']:.5f}"
+                    f" < {confirm_px}")
+        else:
+            if c["h"] >= confirm_px:
+                note = (
+                    "\u26a1 CONFIRM BREAK"
+                    f" hi={c['h']:.5f}"
+                    f" > {confirm_px}")
 
-        print(f"  {fmt(c['t']):>5}  "
-              f"{c['c']:9.5f}  "
-              f"{j15:7.1f}  "
-              f"{j15_peak or 0:7.1f}  "
-              f"{decay:7.1f}  "
-              f"{j1h or 0:6.1f}  "
-              f"{note}")
+        print(f"  {fmt(c['t']):>8} "
+              f" {c['o']:9.5f}"
+              f"  {c['h']:9.5f}"
+              f"  {c['l']:9.5f}"
+              f"  {c['c']:9.5f}"
+              f"  {j:7.1f}"
+              f"  {note}")
 
-    print(f"\n  SUMMARY:")
-    print(f"  J1H at entry:        "
-          f"{j1h_entry:.1f} (hourly "
-          f"context — barely moves "
-          f"in {(close_ts-entry_ts)//60}m)")
-    if j15_peak:
-        print(f"  J15M peak:           "
-              f"{j15_peak:.1f} "
-              f"at {fmt(j15_peak_time)}")
-    if j15_at_cross is not None:
-        print(f"  J15M when price went "
-              f"negative: "
-              f"{j15_at_cross:.1f}")
-        print(f"  J15M decay at that   "
-              f"moment: "
-              f"{decay_at_cross:.1f} pts")
-    if se_would_fire_ts:
-        print(f"  SE fires at:         "
-              f"{fmt(se_would_fire_ts)} "
-              f"PnL={se_would_fire_pnl:+.2f}")
-    else:
-        print(f"  SE never fires "
-              f"(decay never >= 10)")
+    print(f"\n  WHY IT REVERSED:")
+    print(f"  confirm_px={confirm_px}"
+          f" \u2014 price needed to stay"
+          f" {'above' if direction=='LONG' else 'below'}"
+          f" this level")
+    print(f"  duration={duration_s}s"
+          f" \u2014 exited in "
+          f"{'< 1 min' if duration_s < 60 else str(duration_s//60)+'m'}")
 
-def ts(y, mo, d, h, mi):
+def ts(y,mo,d,h,mi,s=0):
     return int(datetime(
-        y, mo, d, h, mi,
+        y,mo,d,h,mi,s,
         tzinfo=timezone.utc
     ).timestamp())
 
+# 6 zero-MFE CONFIRM_REVERSAL
+# trades -- July 1 2026
+# All times UTC
+# Entry prices and confirm_px
+# will be updated once SQL
+# results come back -- using
+# approximate times from log
+# close_time_et converted to UTC
+# (ET = UTC-4 on July 1)
+
 TRADES = [
-    ("NEAR_USDT LONG MFE 0.30R -$139",
-     "NEAR_USDT", "LONG",
-     ts(2026,7,1,8,2),
-     ts(2026,7,1,8,23),
-     55.0, -139.51),
-    ("ZEC_USDT LONG MFE 0.23R -$125",
-     "ZEC_USDT", "LONG",
-     ts(2026,7,1,8,4),
-     ts(2026,7,1,8,23),
-     45.91, -125.51),
-    ("XRP_USDT LONG MFE 0.15R -$110",
-     "XRP_USDT", "LONG",
-     ts(2026,7,1,7,28),
-     ts(2026,7,1,8,34),
-     69.45, -110.35),
-    ("LTC_USDT LONG MFE 0.18R -$111",
+    # LTC HL LONG 08:11 PM ET
+    # = 00:11 UTC Jul 2, dur=4s
+    ("LTC HL LONG dur=4s",
      "LTC_USDT", "LONG",
-     ts(2026,7,1,7,29),
-     ts(2026,7,1,8,0),
-     68.47, -111.68),
-    ("SOL_USDT SHORT MFE 0.27R -$110",
-     "SOL_USDT", "SHORT",
-     ts(2026,7,1,3,17),
-     ts(2026,7,1,3,36),
-     90.56, -110.68),
-    ("BTC_USDT SHORT MFE 0.12R -$110",
-     "BTC_USDT", "SHORT",
-     ts(2026,7,1,3,18),
-     ts(2026,7,1,3,52),
-     99.94, -110.18),
+     ts(2026,7,2,0,11,0),
+     ts(2026,7,2,0,11,4),
+     None, None, 4),
+
+    # SUI_USDT MX LONG 08:13 PM
+    # = 00:13 UTC dur=10s
+    ("SUI_USDT MX LONG dur=10s",
+     "SUI_USDT", "LONG",
+     ts(2026,7,2,0,13,0),
+     ts(2026,7,2,0,13,10),
+     None, None, 10),
+
+    # ADA_USDT MX LONG 09:15 PM
+    # = 01:15 UTC dur=8s
+    ("ADA_USDT MX LONG dur=8s",
+     "ADA_USDT", "LONG",
+     ts(2026,7,2,1,15,0),
+     ts(2026,7,2,1,15,8),
+     None, None, 8),
+
+    # BTC HL LONG 09:20 PM
+    # = 01:20 UTC dur=35s
+    ("BTC HL LONG dur=35s",
+     "BTC_USDT", "LONG",
+     ts(2026,7,2,1,20,0),
+     ts(2026,7,2,1,20,35),
+     None, None, 35),
+
+    # ZEC HL LONG 08:37 PM
+    # = 00:37 UTC dur=33s
+    ("ZEC HL LONG dur=33s",
+     "ZEC_USDT", "LONG",
+     ts(2026,7,2,0,37,0),
+     ts(2026,7,2,0,37,33),
+     None, None, 33),
+
+    # DOGE HL SHORT 06:30 PM
+    # = 22:30 UTC dur=4s
+    ("DOGE HL SHORT dur=4s",
+     "DOGE_USDT", "SHORT",
+     ts(2026,7,1,22,30,0),
+     ts(2026,7,1,22,30,4),
+     None, None, 4),
 ]
 
-print("Fetching Min15 candles for "
-      f"{len(TRADES)} KILL trades...")
-print("SE current = cpnl>0 + 10pt decay")
-print("SE proposed = ever_profitable "
-      "+ 10pt decay")
-print()
+print("Zero-MFE CONFIRM_REVERSAL"
+      " forensic analysis")
+print("Fetching Min1 candles"
+      " for all 6 trades...\n")
 
 for t in TRADES:
     try:
         analyze(*t)
     except Exception as e:
-        print(f"\n{t[0]}: ERROR {e}")
+        print(f"\n{t[0]}: "
+              f"ERROR {e}")
 
 print("\nDone.")

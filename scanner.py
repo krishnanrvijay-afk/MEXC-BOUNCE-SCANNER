@@ -251,7 +251,7 @@ def score_bounce_short(j15m, j1h, ask_pct, adx,
     tier, lev = _leverage_tier(adx)
     stoch_gate = stoch_k > 75 and stoch_k <= 84 and stoch_k < stoch_d
     if not (j15m > J15M_SHORT_GATE and j1h > J1H_SHORT_MIN and j1h <= J1H_SHORT_MAX
-            and stoch_gate and ask_pct >= DEPTH_GATE_PCT and adx >= ADX_MIN_SHORT):
+            and stoch_gate):
         return 0, tier, lev
     score = 4
     if j5m  > 80:              score += 2
@@ -266,7 +266,7 @@ def score_bounce_long(j15m, j1h, bid_pct, adx,
     tier, lev = _leverage_tier(adx)
     stoch_gate = stoch_k < 25 and stoch_k > stoch_d
     if not (j15m < J15M_LONG_GATE and j1h >= J1H_LONG_MIN
-            and stoch_gate and bid_pct >= DEPTH_GATE_PCT and adx >= ADX_MIN_LONG):
+            and stoch_gate):
         return 0, tier, lev
     score = 4
     if j5m  < 20:              score += 2
@@ -666,6 +666,24 @@ async def run_full_scan(client, market_health: Optional[dict] = None) -> list[di
                     "adx1h":        round(adx1h, 2),
                     "bid_pct":      bid_pct,
                     "ask_pct":      ask_pct,
+                    "adx_context":  round(adx1h, 2),
+                    "adx_tier": (
+                        "STRONG" if adx1h >= 35
+                        else "MODERATE" if adx1h >= 20
+                        else "WEAK"),
+                    "depth_bid_pct": bid_pct,
+                    "depth_ask_pct": ask_pct,
+                    "depth_context": (
+                        "STRONG_BID" if bid_pct >= 65
+                        else "NEUTRAL" if bid_pct >= 45
+                        else "STRONG_ASK"),
+                    "vol_15m":      vol_15m,
+                    "vol_ma15m":    vol_ma15m,
+                    "vol_surge":    (vol_15m > vol_ma15m * 1.5),
+                    "ma_stack_1h": (
+                        "BULL" if (ma10 and ma30 and ma60 and ma10 > ma30 > ma60)
+                        else "BEAR" if (ma10 and ma30 and ma60 and ma10 < ma30 < ma60)
+                        else "MIXED"),
                     "trend":        trend,
                     "ma10":         round(ma10, 6) if ma10 else None,
                     "ma30":         round(ma30, 6) if ma30 else None,

@@ -43,7 +43,10 @@ def fetch_mexc(symbol, interval, limit=100):
                 "o": float(raw["open"][i]),
                 "h": float(raw["high"][i]),
                 "l": float(raw["low"][i]),
-                "c": float(raw["close"][i])
+                "c": float(raw["close"][i]),
+                "close": float(raw["close"][i]),
+                "high": float(raw["high"][i]),
+                "low": float(raw["low"][i])
             })
         return sorted(out, key=lambda x: x["t"])
     except Exception as e:

@@ -657,6 +657,7 @@ def _append_trade_log(trade: dict, exit_price: float, reason: str, pnl: float, r
                 "adx1h":            trade.get("adx1h"),
                 "mae_r":            _mae_r,
                 "mfe_r":            _mfe_r,
+                "size":             trade.get("size", None),
             }
             if trade.get("vwap_at_entry") is not None:
                 _tl_row["vwap_at_entry"] = trade.get("vwap_at_entry")

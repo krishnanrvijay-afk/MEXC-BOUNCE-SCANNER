@@ -2,18 +2,14 @@ import requests, time
 from datetime import datetime, timezone
 
 BASE = (
-  "https://contract.mexc.com"
-  "/api/v1/contract/kline")
+    "https://contract.mexc.com"
+    "/api/v1/contract/kline")
 
-def fetch(symbol, interval,
-          start, end):
+def fetch(symbol, interval, start, end):
     time.sleep(0.5)
     r = requests.get(
         f"{BASE}/{symbol}",
-        params={
-          "interval": interval,
-          "start": start,
-          "end": end},
+        params={"interval": interval, "start": start, "end": end},
         timeout=15)
     r.raise_for_status()
     d = r.json()
@@ -21,196 +17,136 @@ def fetch(symbol, interval,
         return []
     raw = d["data"]
     out = []
-    for i in range(
-            len(raw["time"])):
+    for i in range(len(raw["time"])):
         out.append({
-          "t": int(raw["time"][i]),
-          "o": float(raw["open"][i]),
-          "h": float(raw["high"][i]),
-          "l": float(raw["low"][i]),
-          "c": float(raw["close"][i]),
+            "t": int(raw["time"][i]),
+            "o": float(raw["open"][i]),
+            "h": float(raw["high"][i]),
+            "l": float(raw["low"][i]),
+            "c": float(raw["close"][i]),
+            "v": float(raw["vol"][i]) if "vol" in raw else 0.0,
         })
-    return sorted(
-        out, key=lambda x: x["t"])
+    return sorted(out, key=lambda x: x["t"])
 
 def compute_kdj(candles, n=9):
     K, D = 50.0, 50.0
     result = []
     for i, c in enumerate(candles):
-        w = candles[max(0,i-n+1):i+1]
+        w = candles[max(0, i - n + 1):i + 1]
         hi = max(x["h"] for x in w)
         lo = min(x["l"] for x in w)
         rng = hi - lo
-        rsv = ((c["c"]-lo)/rng*100
-               if rng > 0 else 50.0)
+        rsv = ((c["c"] - lo) / rng * 100 if rng > 0 else 50.0)
         K = (2/3)*K + (1/3)*rsv
         D = (2/3)*D + (1/3)*K
-        result.append(
-            round(3*K-2*D, 2))
+        result.append(round(3*K - 2*D, 2))
     return result
 
 def fmt(ts):
     return datetime.fromtimestamp(
-        ts - 14400,
-        tz=timezone.utc
-    ).strftime("%H:%M")
-
-def pnl_long(entry, price,
-        margin=5000, lev=5):
-    sz = (margin * lev) / entry
-    return round(
-        (price - entry) * sz, 2)
+        ts - 14400, tz=timezone.utc).strftime("%H:%M")
 
 def ts(iso):
     return int(
         datetime.fromisoformat(
-            iso.replace('+00','')
-        ).replace(
-            tzinfo=timezone.utc
-        ).timestamp())
+            iso.replace('+00', '')
+        ).replace(tzinfo=timezone.utc).timestamp())
 
-def analyze(label, symbol,
-            entry, open_ts,
-            close_ts, exit_pnl,
-            direction="LONG"):
+def analyze(label, symbol, entry, open_ts, close_ts, exit_pnl):
     print(f"\n{'='*72}")
     print(f"  {label}")
-    print(f"  {symbol} {direction}"
-          f"  entry={entry}"
-          f"  exit_pnl={exit_pnl:+.2f}")
-    print(f"  open={fmt(open_ts)} ET"
-          f"  close={fmt(close_ts)} ET")
+    print(f"  entry={entry}  open={fmt(open_ts)} ET"
+          f"  close={fmt(close_ts)} ET  exit_pnl={exit_pnl:+.2f}")
     print(f"{'='*72}")
 
-    start = open_ts - 5400
-    end   = close_ts + 3600
+    start = open_ts - 9000
+    end   = close_ts + 1800
 
-    c1m  = fetch(symbol,"Min1",
-        start, end)
-    c5m  = fetch(symbol,"Min5",
-        start, end)
-    c15m = fetch(symbol,"Min15",
-        start, end)
+    c1m = fetch(symbol, "Min1", start, end)
+    c5m = fetch(symbol, "Min5", start, end)
 
     if not c1m:
         print("  no candle data")
         return
 
-    j1m  = compute_kdj(c1m)
-    j5m  = compute_kdj(c5m)
-    j15m = compute_kdj(c15m)
+    j1m = compute_kdj(c1m)
+    j5m_list = compute_kdj(c5m)
 
     j5m_map = {}
-    for i,c in enumerate(c5m):
+    for i, c in enumerate(c5m):
         for o in range(5):
-            j5m_map[c["t"]+o*60] = \
-                j5m[i]
+            j5m_map[c["t"] + o*60] = (j5m_list[i], c5m[i]["v"])
 
-    j15m_map = {}
-    for i,c in enumerate(c15m):
-        for o in range(15):
-            j15m_map[c["t"]+o*60] \
-                = j15m[i]
+    baseline_vols = [
+        c["v"] for c in c1m
+        if c["t"] < open_ts - 3600
+    ]
+    avg_vol = (
+        sum(baseline_vols) / len(baseline_vols)
+        if baseline_vols else 1.0)
 
-    j5_first  = None
-    j15_first = None
-    post_peak = None
+    comp_candles = []
+    for i, c in enumerate(c1m):
+        if c["t"] >= open_ts:
+            break
+        j5 = j5m_map.get(c["t"], (50.0, 0))[0]
+        if j5 < 20:
+            comp_candles.append((c, j1m[i], j5))
 
-    print(f"  {'TIME':>5}"
-          f"  {'CLOSE':>10}"
-          f"  {'PNL':>9}"
-          f"  {'J1M':>6}"
-          f"  {'J5M':>6}"
-          f"  {'J15M':>6}"
-          f"  NOTE")
-    print(f"  {'-'*65}")
+    if not comp_candles:
+        print("  no J5M<20 window found pre-signal")
+        return
 
-    for i,c in enumerate(c1m):
-        j1 = j1m[i]
-        j5 = j5m_map.get(c["t"],0)
-        j15= j15m_map.get(c["t"],0)
-        p  = pnl_long(entry,c["c"])
+    comp_start = comp_candles[0][0]["t"]
+    comp_end   = comp_candles[-1][0]["t"]
+    comp_duration = (comp_end - comp_start) // 60
 
-        if (j5 < 20 and
-                j5_first is None and
-                c["t"] < open_ts):
-            j5_first = c["t"]
-        if (j15 < 20 and
-                j15_first is None and
-                c["t"] < open_ts):
-            j15_first = c["t"]
+    print(f"\n  COMPRESSION WINDOW:")
+    print(f"  {fmt(comp_start)} — {fmt(comp_end)} ET ({comp_duration} min)")
+    print(f"  Baseline avg vol (pre-compression): {avg_vol:.1f}")
+    print(f"\n  {'TIME':>5}  {'CLOSE':>10}  {'J1M':>6}  {'J5M':>6}"
+          f"  {'VOL':>10}  {'VOL/AVG':>8}  {'PATTERN'}")
+    print(f"  {'-'*62}")
 
-        if (c["t"] > close_ts and
-                (post_peak is None
-                 or p > post_peak)):
-            post_peak = p
+    for c, j1, j5 in comp_candles:
+        vol_ratio = (c["v"] / avg_vol if avg_vol > 0 else 0)
+        if vol_ratio < 0.5:
+            pattern = "LOW VOL <- exhaustion"
+        elif vol_ratio > 1.5:
+            pattern = "HIGH VOL <- selling pressure"
+        else:
+            pattern = "NORMAL VOL"
+        print(f"  {fmt(c['t']):>5}  {c['c']:10.5f}  {j1:6.1f}  {j5:6.1f}"
+              f"  {c['v']:10.1f}  {vol_ratio:8.2f}x  {pattern}")
 
-        note = ""
-        if abs(c["t"]-open_ts)<90:
-            note = "★ ENTRY"
-        elif abs(c["t"]-close_ts)<90:
-            note = "★ EXIT"
-        elif c["t"] < open_ts:
-            if j5<20 and j15<20:
-                note = "⚡BOTH<20"
-            elif j5<20:
-                note = "J5M<20"
-            elif j15<20:
-                note = "J15M<20"
-        elif c["t"] > close_ts:
-            note = "post"
+    comp_vols = [c["v"] for c, _, _ in comp_candles]
+    avg_comp_vol = (
+        sum(comp_vols) / len(comp_vols)
+        if comp_vols else 0)
+    vol_vs_baseline = (
+        avg_comp_vol / avg_vol if avg_vol > 0 else 0)
 
-        # only print pre-signal
-        # window last 30 min,
-        # trade duration, and
-        # 30 min post-exit
-        in_pre = (
-            c["t"] >= open_ts-1800
-            and c["t"] < open_ts)
-        in_trade = (
-            c["t"] >= open_ts
-            and c["t"] <= close_ts)
-        in_post = (
-            c["t"] > close_ts
-            and c["t"] <=
-            close_ts+1800)
+    declining = (
+        len(comp_vols) >= 3 and
+        comp_vols[-1] < comp_vols[0])
 
-        if in_pre or in_trade \
-                or in_post:
-            print(
-                f"  {fmt(c['t']):>5}"
-                f"  {c['c']:10.5f}"
-                f"  {p:9.2f}"
-                f"  {j1:6.1f}"
-                f"  {j5:6.1f}"
-                f"  {j15:6.1f}"
-                f"  {note}")
+    print(f"\n  VOLUME SUMMARY:")
+    print(f"  Avg vol at compression: {avg_comp_vol:.1f}"
+          f" ({vol_vs_baseline:.2f}x baseline)")
+    print(f"  Volume trend: {'DECLINING' if declining else 'NOT DECLINING'}")
 
-    print(f"\n  SUMMARY:")
-    if j5_first:
-        lag = (open_ts-j5_first)//60
-        print(f"  J5M<20 first at"
-              f" {fmt(j5_first)} ET"
-              f" — {lag}m before"
-              f" entry")
+    if vol_vs_baseline < 0.7:
+        print(f"  -> EXHAUSTION SIGNAL: volume dried up at compression bottom")
+    elif vol_vs_baseline > 1.3:
+        print(f"  -> CAPITULATION SIGNAL: high volume selling at bottom"
+              f" (can also mark a bottom)")
     else:
-        print(f"  J5M never <20"
-              f" pre-signal")
-    if j15_first:
-        lag=(open_ts-j15_first)//60
-        print(f"  J15M<20 first at"
-              f" {fmt(j15_first)} ET"
-              f" — {lag}m before"
-              f" entry")
-    else:
-        print(f"  J15M never <20"
-              f" pre-signal")
-    if post_peak is not None:
-        print(f"  Post-exit best"
-              f" PnL: +${post_peak:.2f}"
-              f" (left on table"
-              f" vs exit"
-              f" {exit_pnl:+.2f})")
+        print(f"  -> NEUTRAL VOLUME: no clear exhaustion or capitulation signal")
+
+    print(f"\n  Entry at {fmt(open_ts)} ET"
+          f" — {(open_ts - comp_end) // 60} min after compression ended")
+    print(f"  Exit PnL: {exit_pnl:+.2f}")
+
 
 TRADES = [
     ("WIF PEAK_DECAY +$44",
@@ -256,7 +192,7 @@ TRADES = [
      99.7),
 ]
 
-print("J5M vs J15M LAG FORENSIC")
+print("VOLUME AT COMPRESSION FORENSIC -- 7 trades")
 print(f"{len(TRADES)} trades\n")
 
 for t in TRADES:

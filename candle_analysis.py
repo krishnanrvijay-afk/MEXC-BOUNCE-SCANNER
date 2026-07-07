@@ -28,39 +28,37 @@ def fetch(symbol, interval,
           "h": float(raw["high"][i]),
           "l": float(raw["low"][i]),
           "c": float(raw["close"][i]),
-          "v": float(raw["vol"][i])
-            if "vol" in raw else 0,
         })
     return sorted(
         out, key=lambda x: x["t"])
 
-def fmt(ts):
-    return datetime.fromtimestamp(
-        ts, tz=timezone.utc
-    ).strftime("%H:%M:%S")
+def compute_kdj(candles, n=9):
+    K, D = 50.0, 50.0
+    result = []
+    for i, c in enumerate(candles):
+        w = candles[max(0,i-n+1):i+1]
+        hi = max(x["h"] for x in w)
+        lo = min(x["l"] for x in w)
+        rng = hi - lo
+        rsv = ((c["c"]-lo)/rng*100
+               if rng > 0 else 50.0)
+        K = (2/3)*K + (1/3)*rsv
+        D = (2/3)*D + (1/3)*K
+        J = round(3*K - 2*D, 2)
+        result.append(J)
+    return result
 
 def fmt_et(ts):
-    # UTC-4 for EDT
     return datetime.fromtimestamp(
         ts - 14400,
         tz=timezone.utc
-    ).strftime("%H:%M:%S ET")
+    ).strftime("%H:%M")
 
-def pnl_short(entry, price,
+def pnl_long(entry, price,
         margin=5000, lev=5):
     sz = (margin * lev) / entry
     return round(
-        (entry - price) * sz, 2)
-
-def r_val(entry, price,
-          sl, margin=5000, lev=5):
-    sz = (margin * lev) / entry
-    risk = abs(entry - sl) * sz
-    if risk == 0:
-        return 0
-    return round(
-        (entry - price) * sz
-        / risk, 3)
+        (price - entry) * sz, 2)
 
 def ts(iso):
     return int(
@@ -70,136 +68,163 @@ def ts(iso):
             tzinfo=timezone.utc
         ).timestamp())
 
-# HYPE_USDT SHORT
-SYMBOL   = "HYPE_USDT"
-ENTRY    = 72.26
-SL       = 73.1629
-TP1      = 71.2851
-OPEN_TS  = ts(
-    "2026-07-06 01:26:03+00")
-CLOSE_TS = ts(
-    "2026-07-06 01:32:15+00")
-EXIT_PX  = 72.269
-EXIT_PNL = -1.25
-MFE_R    = 0.17
-MAE_R    = -0.01
+# WIF_USDT LONG
+# Signal: 16:45 ET = 20:45 UTC
+# Close: 16:56 ET = 20:56 UTC
+# Entry: 0.17140
+# Exit: PEAK_DECAY_20 +$43.76
 
-# Fetch 60 min before open
-# to 60 min after close
-START = OPEN_TS - 3600
-END   = CLOSE_TS + 3600
+SYMBOL   = "WIF_USDT"
+ENTRY    = 0.17140
+SIGNAL_TS = ts(
+    "2026-07-06 20:45:00+00")
+CLOSE_TS  = ts(
+    "2026-07-06 20:56:00+00")
+START     = SIGNAL_TS - 3600
+END       = CLOSE_TS + 1800
 
-print("Fetching Min1 candles...")
-candles = fetch(
-    SYMBOL, "Min1", START, END)
+print("Fetching candles...")
+c1m = fetch(SYMBOL, "Min1",
+    START, END)
+c5m = fetch(SYMBOL, "Min5",
+    START, END)
+c15m = fetch(SYMBOL, "Min15",
+    START, END)
 
-print(f"\n{'='*80}")
-print(f"  HYPE_USDT SHORT FORENSIC")
+# Compute J values on all
+# three timeframes
+j1m_vals  = compute_kdj(c1m)
+j5m_vals  = compute_kdj(c5m)
+j15m_vals = compute_kdj(c15m)
+
+# Map J5M and J15M values to
+# minute timestamps for lookup
+j5m_map = {}
+for i, c in enumerate(c5m):
+    for offset in range(5):
+        j5m_map[c["t"] + offset*60] \
+            = j5m_vals[i]
+
+j15m_map = {}
+for i, c in enumerate(c15m):
+    for offset in range(15):
+        j15m_map[c["t"]
+            + offset*60] \
+            = j15m_vals[i]
+
+print(f"\n{'='*90}")
+print(f"  WIF_USDT LONG FORENSIC"
+      f" — J1M / J5M / J15M"
+      f" RELATIONSHIP")
 print(f"  Entry: {ENTRY}"
-      f"  SL: {SL}"
-      f"  TP1: {TP1}")
-print(f"  Open:  {fmt_et(OPEN_TS)}"
-      f"  Close: {fmt_et(CLOSE_TS)}")
-print(f"  Exit PX: {EXIT_PX}"
-      f"  PnL: {EXIT_PNL}"
-      f"  MFE: {MFE_R}R"
-      f"  MAE: {MAE_R}R")
-print(f"{'='*80}")
-print(f"  {'TIME ET':>10}"
-      f"  {'OPEN':>10}"
-      f"  {'HIGH':>10}"
-      f"  {'LOW':>10}"
-      f"  {'CLOSE':>10}"
-      f"  {'PNL_C':>9}"
-      f"  {'PNL_H':>9}"
-      f"  {'PNL_L':>9}"
-      f"  {'R_C':>6}"
-      f"  {'NOTE'}")
-print(f"  {'-'*110}")
+      f"  Signal: {fmt_et(SIGNAL_TS)}"
+      f" ET")
+print(f"{'='*90}")
+print(f"  {'TIME':>5}"
+      f"  {'CLOSE':>9}"
+      f"  {'PNL':>9}"
+      f"  {'J1M':>7}"
+      f"  {'J5M':>7}"
+      f"  {'J15M':>7}"
+      f"  {'J5<20':>6}"
+      f"  {'J15<20':>7}"
+      f"  NOTE")
+print(f"  {'-'*80}")
 
-peak_pnl = None
-peak_ts  = None
-post_peak_low_pnl = None
-
-for c in candles:
-    p_close = pnl_short(ENTRY, c["c"])
-    p_high  = pnl_short(ENTRY, c["h"])
-    p_low   = pnl_short(ENTRY, c["l"])
-    r_close = r_val(ENTRY, c["c"], SL)
-
-    # track peak (best SHORT = lowest price)
-    if (c["t"] >= OPEN_TS and
-            c["t"] <= CLOSE_TS):
-        if (peak_pnl is None or
-                p_low > peak_pnl):
-            peak_pnl = p_low
-            peak_ts  = c["t"]
+for i, c in enumerate(c1m):
+    j1m  = j1m_vals[i]
+    j5m  = j5m_map.get(c["t"], 0)
+    j15m = j15m_map.get(c["t"], 0)
+    cpnl = pnl_long(ENTRY, c["c"])
+    j5_sig  = "YES" if j5m  < 20 \
+        else "---"
+    j15_sig = "YES" if j15m < 20 \
+        else "---"
 
     note = ""
-    if abs(c["t"] - OPEN_TS) < 90:
-        note = "ENTRY"
-    elif abs(c["t"] - CLOSE_TS) < 90:
-        note = "★ CR EXIT"
+    if abs(c["t"]-SIGNAL_TS) < 90:
+        note = "★ SIGNAL"
+    elif c["t"] > SIGNAL_TS and \
+            c["t"] <= CLOSE_TS:
+        note = "IN TRADE"
     elif c["t"] > CLOSE_TS:
         note = "POST-EXIT"
-        if (post_peak_low_pnl is None
-                or p_low >
-                post_peak_low_pnl):
-            post_peak_low_pnl = p_low
 
-    # flag BE cross
-    if (c["t"] >= OPEN_TS and
-            c["h"] >= ENTRY and
-            not note):
-        note += " ⚡BE_CROSS"
-
-    # flag TP1 reach
-    if c["l"] <= TP1:
-        note += " ★TP1"
-
-    # flag SL proximity
-    if c["h"] >= SL * 0.998:
-        note += " ⚠SL_NEAR"
+    # flag when both J5M and
+    # J15M are compressed
+    if (j5m < 20 and j15m < 20
+            and not note):
+        note = "⚡ BOTH COMPRESSED"
+    elif (j5m < 20 and j15m >= 20
+            and not note):
+        note = "J5M only compressed"
+    elif (j5m >= 20 and j15m < 20
+            and not note):
+        note = "J15M only compressed"
 
     print(
-        f"  {fmt_et(c['t']):>10}"
-        f"  {c['o']:10.4f}"
-        f"  {c['h']:10.4f}"
-        f"  {c['l']:10.4f}"
-        f"  {c['c']:10.4f}"
-        f"  {p_close:9.2f}"
-        f"  {p_high:9.2f}"
-        f"  {p_low:9.2f}"
-        f"  {r_close:6.3f}"
+        f"  {fmt_et(c['t']):>5}"
+        f"  {c['c']:9.5f}"
+        f"  {cpnl:9.2f}"
+        f"  {j1m:7.1f}"
+        f"  {j5m:7.1f}"
+        f"  {j15m:7.1f}"
+        f"  {j5_sig:>6}"
+        f"  {j15_sig:>7}"
         f"  {note}")
 
-print(f"\n{'='*80}")
-print(f"  TRADE SUMMARY")
-print(f"{'='*80}")
-print(f"  Entry:        {ENTRY}")
-print(f"  Exit:         {EXIT_PX}"
-      f"  ({EXIT_PNL})")
-print(f"  Duration:     372s"
-      f" (6m 12s)")
-print(f"  MAE:          {MAE_R}R")
-print(f"  MFE:          {MFE_R}R")
-if peak_pnl:
-    print(f"  Peak PnL:     "
-          f"+${peak_pnl:.2f}"
-          f" at {fmt_et(peak_ts)}")
-if post_peak_low_pnl:
-    print(f"  Post-exit"
-          f" best PnL:  "
-          f"+${post_peak_low_pnl:.2f}"
-          f" (if held)")
-print(f"\n  CONFIRM_REVERSAL fired"
-      f" when price rose back"
-      f" to entry {ENTRY}"
-      f" at {fmt_et(CLOSE_TS)}")
-_mfe_usd = round(0.17 * abs(ENTRY - SL) * (25000 / ENTRY), 2)
-print(f"  MFE was 0.17R ="
-      f" approximately"
-      f" +${_mfe_usd}"
-      f" at best point")
+print(f"\n{'='*90}")
+print(f"  SUMMARY")
+print(f"{'='*90}")
 
+# Find when J5M first
+# compressed below 20
+j5m_first = None
+j15m_first = None
+for i, c in enumerate(c1m):
+    j5m  = j5m_map.get(c["t"], 0)
+    j15m = j15m_map.get(c["t"], 0)
+    if j5m_first is None \
+            and j5m < 20 \
+            and c["t"] < SIGNAL_TS:
+        j5m_first = c["t"]
+    if j15m_first is None \
+            and j15m < 20 \
+            and c["t"] < SIGNAL_TS:
+        j15m_first = c["t"]
+
+if j5m_first:
+    lag = (SIGNAL_TS - j5m_first) \
+        // 60
+    print(f"  J5M first compressed"
+          f" <20: {fmt_et(j5m_first)}"
+          f" ET ({lag} min before"
+          f" signal)")
+else:
+    print(f"  J5M never compressed"
+          f" <20 before signal")
+
+if j15m_first:
+    lag = (SIGNAL_TS - j15m_first) \
+        // 60
+    print(f"  J15M first compressed"
+          f" <20: {fmt_et(j15m_first)}"
+          f" ET ({lag} min before"
+          f" signal)")
+else:
+    print(f"  J15M never compressed"
+          f" <20 before signal")
+
+if j5m_first and j15m_first:
+    diff = (j15m_first - j5m_first) \
+        // 60
+    print(f"  J5M led J15M by:"
+          f" {diff} minutes")
+
+print(f"\n  Price at J5M compression:"
+      f" entry reference {ENTRY}")
+print(f"  Price at signal:"
+      f" {ENTRY} (entry)")
+print(f"  Best post-signal PnL:"
+      f" +$43.76 (PEAK_DECAY_20)")
 print("\nDone.")

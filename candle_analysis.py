@@ -9,12 +9,15 @@ def fetch(symbol, interval, start, end):
     time.sleep(0.5)
     r = requests.get(
         f"{BASE}/{symbol}",
-        params={"interval": interval, "start": start, "end": end},
+        params={
+            "interval": interval,
+            "start": start,
+            "end": end},
         timeout=15)
     r.raise_for_status()
     d = r.json()
     if not d.get("success"):
-        return []
+        raise ValueError(str(d)[:80])
     raw = d["data"]
     out = []
     for i in range(len(raw["time"])):
@@ -24,181 +27,155 @@ def fetch(symbol, interval, start, end):
             "h": float(raw["high"][i]),
             "l": float(raw["low"][i]),
             "c": float(raw["close"][i]),
-            "v": float(raw["vol"][i]) if "vol" in raw else 0.0,
+            "v": float(raw["vol"][i])
+                if "vol" in raw else 0.0,
         })
     return sorted(out, key=lambda x: x["t"])
 
-def compute_kdj(candles, n=9):
-    K, D = 50.0, 50.0
-    result = []
-    for i, c in enumerate(candles):
-        w = candles[max(0, i - n + 1):i + 1]
-        hi = max(x["h"] for x in w)
-        lo = min(x["l"] for x in w)
-        rng = hi - lo
-        rsv = ((c["c"] - lo) / rng * 100 if rng > 0 else 50.0)
-        K = (2/3)*K + (1/3)*rsv
-        D = (2/3)*D + (1/3)*K
-        result.append(round(3*K - 2*D, 2))
-    return result
-
-def fmt(ts):
+def fmt_et(ts):
     return datetime.fromtimestamp(
-        ts - 14400, tz=timezone.utc).strftime("%H:%M")
+        ts - 14400,
+        tz=timezone.utc
+    ).strftime("%H:%M:%S")
+
+def pnl_long(entry, price, margin=5000, lev=5):
+    sz = (margin * lev) / entry
+    return round((price - entry) * sz, 2)
+
+def r_val(entry, price, sl, margin=5000, lev=5):
+    sz = (margin * lev) / entry
+    risk = abs(entry - sl) * sz
+    if risk == 0:
+        return 0
+    return round((price - entry) * sz / risk, 3)
 
 def ts(iso):
     return int(
         datetime.fromisoformat(
             iso.replace('+00', '')
-        ).replace(tzinfo=timezone.utc).timestamp())
+        ).replace(
+            tzinfo=timezone.utc
+        ).timestamp())
 
-def analyze(label, symbol, entry, open_ts, close_ts, exit_pnl):
-    print(f"\n{'='*72}")
-    print(f"  {label}")
-    print(f"  entry={entry}  open={fmt(open_ts)} ET"
-          f"  close={fmt(close_ts)} ET  exit_pnl={exit_pnl:+.2f}")
-    print(f"{'='*72}")
+# DOGE_USDT LONG KILL
+SYMBOL   = "DOGE_USDT"
+ENTRY    = 0.07681
+SL       = 0.076072
+TP1      = 0.077608
+OPEN_TS  = ts("2026-07-06 23:31:13+00")
+CLOSE_TS = ts("2026-07-07 00:08:59+00")
+EXIT_PX  = 0.0765
+EXIT_PNL = -100.9
+MAE_R    = -0.42
+MFE_R    = 0.05
 
-    start = open_ts - 9000
-    end   = close_ts + 1800
+START = OPEN_TS - 1800
+END   = CLOSE_TS + 900
 
-    c1m = fetch(symbol, "Min1", start, end)
-    c5m = fetch(symbol, "Min5", start, end)
+print("Fetching candles...")
+candles = fetch(SYMBOL, "Min1", START, END)
 
-    if not c1m:
-        print("  no candle data")
-        return
+print(f"\n{'='*90}")
+print(f"  DOGE_USDT LONG KILL FORENSIC")
+print(f"  Entry: {ENTRY}  SL: {SL}  TP1: {TP1}")
+print(f"  Open: {fmt_et(OPEN_TS)} ET  Close: {fmt_et(CLOSE_TS)} ET")
+print(f"  Actual exit: {EXIT_PX}  PnL: {EXIT_PNL}  MAE: {MAE_R}R  MFE: {MFE_R}R")
+print(f"  Duration: {2266}s (37m 46s)")
+print(f"{'='*90}")
+print(f"  {'TIME':>10}"
+      f"  {'HIGH':>9}"
+      f"  {'LOW':>9}"
+      f"  {'CLOSE':>9}"
+      f"  {'PNL':>9}"
+      f"  {'R':>6}"
+      f"  {'AGE':>5}"
+      f"  {'BOUNDARY_H':>12}"
+      f"  {'3H_SIGNAL':>10}"
+      f"  NOTE")
+print(f"  {'-'*105}")
 
-    j1m = compute_kdj(c1m)
-    j5m_list = compute_kdj(c5m)
+# simulate 3H_LOWER_HIGH using candle close as boundary price proxy
+boundary_prices = []
+last_candle_ts = 0
+triggered_3h = None
+triggered_3h_pnl = None
+triggered_3h_r = None
 
-    j5m_map = {}
-    for i, c in enumerate(c5m):
-        for o in range(5):
-            j5m_map[c["t"] + o*60] = (j5m_list[i], c5m[i]["v"])
+for c in candles:
+    if c["t"] < OPEN_TS:
+        continue
+    if c["t"] > CLOSE_TS + 600:
+        break
 
-    baseline_vols = [
-        c["v"] for c in c1m
-        if c["t"] < open_ts - 3600
-    ]
-    avg_vol = (
-        sum(baseline_vols) / len(baseline_vols)
-        if baseline_vols else 1.0)
+    age = c["t"] - OPEN_TS
+    cpnl = pnl_long(ENTRY, c["c"])
+    cr = r_val(ENTRY, c["c"], SL)
 
-    comp_candles = []
-    for i, c in enumerate(c1m):
-        if c["t"] >= open_ts:
-            break
-        j5 = j5m_map.get(c["t"], (50.0, 0))[0]
-        if j5 < 20:
-            comp_candles.append((c, j1m[i], j5))
+    now_candle = (c["t"] // 60) * 60
+    boundary_signal = "---"
 
-    if not comp_candles:
-        print("  no J5M<20 window found pre-signal")
-        return
+    if now_candle > last_candle_ts:
+        boundary_prices.append(c["c"])
+        if len(boundary_prices) > 3:
+            boundary_prices = boundary_prices[-3:]
+        last_candle_ts = now_candle
 
-    comp_start = comp_candles[0][0]["t"]
-    comp_end   = comp_candles[-1][0]["t"]
-    comp_duration = (comp_end - comp_start) // 60
+        if (age >= 180
+                and cpnl <= 0
+                and len(boundary_prices) >= 3
+                and triggered_3h is None):
+            b1 = boundary_prices[-3]
+            b2 = boundary_prices[-2]
+            b3 = boundary_prices[-1]
+            if b3 < b2 < b1:
+                triggered_3h = c["t"]
+                triggered_3h_pnl = cpnl
+                triggered_3h_r = cr
+                boundary_signal = "★ FIRE"
+            else:
+                boundary_signal = "no"
+        elif triggered_3h is None:
+            boundary_signal = "warming"
 
-    print(f"\n  COMPRESSION WINDOW:")
-    print(f"  {fmt(comp_start)} — {fmt(comp_end)} ET ({comp_duration} min)")
-    print(f"  Baseline avg vol (pre-compression): {avg_vol:.1f}")
-    print(f"\n  {'TIME':>5}  {'CLOSE':>10}  {'J1M':>6}  {'J5M':>6}"
-          f"  {'VOL':>10}  {'VOL/AVG':>8}  {'PATTERN'}")
-    print(f"  {'-'*62}")
+    note = ""
+    if c["t"] == OPEN_TS:
+        note = "ENTRY"
+    elif abs(c["t"] - CLOSE_TS) < 90:
+        note = "★ KILL EXIT"
+    elif c["t"] > CLOSE_TS:
+        note = "post-exit"
+    elif triggered_3h and c["t"] >= triggered_3h:
+        note = "3H would have exited"
 
-    for c, j1, j5 in comp_candles:
-        vol_ratio = (c["v"] / avg_vol if avg_vol > 0 else 0)
-        if vol_ratio < 0.5:
-            pattern = "LOW VOL <- exhaustion"
-        elif vol_ratio > 1.5:
-            pattern = "HIGH VOL <- selling pressure"
-        else:
-            pattern = "NORMAL VOL"
-        print(f"  {fmt(c['t']):>5}  {c['c']:10.5f}  {j1:6.1f}  {j5:6.1f}"
-              f"  {c['v']:10.1f}  {vol_ratio:8.2f}x  {pattern}")
+    bp_str = (
+        f"{boundary_prices[-1]:.5f}"
+        if boundary_prices else "---")
 
-    comp_vols = [c["v"] for c, _, _ in comp_candles]
-    avg_comp_vol = (
-        sum(comp_vols) / len(comp_vols)
-        if comp_vols else 0)
-    vol_vs_baseline = (
-        avg_comp_vol / avg_vol if avg_vol > 0 else 0)
+    print(
+        f"  {fmt_et(c['t']):>10}"
+        f"  {c['h']:9.5f}"
+        f"  {c['l']:9.5f}"
+        f"  {c['c']:9.5f}"
+        f"  {cpnl:9.2f}"
+        f"  {cr:6.3f}"
+        f"  {age:5}s"
+        f"  {bp_str:>12}"
+        f"  {boundary_signal:>10}"
+        f"  {note}")
 
-    declining = (
-        len(comp_vols) >= 3 and
-        comp_vols[-1] < comp_vols[0])
+print(f"\n{'='*90}")
+print(f"  SIMULATION SUMMARY")
+print(f"{'='*90}")
+print(f"  Actual KILL exit: {EXIT_PX}  PnL: {EXIT_PNL}  at {fmt_et(CLOSE_TS)} ET")
 
-    print(f"\n  VOLUME SUMMARY:")
-    print(f"  Avg vol at compression: {avg_comp_vol:.1f}"
-          f" ({vol_vs_baseline:.2f}x baseline)")
-    print(f"  Volume trend: {'DECLINING' if declining else 'NOT DECLINING'}")
+if triggered_3h:
+    saving = abs(EXIT_PNL) - abs(triggered_3h_pnl)
+    print(f"  3H_LOWER_HIGH would have fired at: {fmt_et(triggered_3h)} ET")
+    print(f"  PnL at 3H exit: {triggered_3h_pnl:.2f}")
+    print(f"  R at 3H exit: {triggered_3h_r:.3f}R")
+    print(f"  Capital saved vs KILL: ${saving:.2f}")
+    print(f"  Time saved: {(CLOSE_TS-triggered_3h)//60} minutes earlier")
+else:
+    print(f"  3H_LOWER_HIGH did NOT trigger during this trade")
 
-    if vol_vs_baseline < 0.7:
-        print(f"  -> EXHAUSTION SIGNAL: volume dried up at compression bottom")
-    elif vol_vs_baseline > 1.3:
-        print(f"  -> CAPITULATION SIGNAL: high volume selling at bottom"
-              f" (can also mark a bottom)")
-    else:
-        print(f"  -> NEUTRAL VOLUME: no clear exhaustion or capitulation signal")
-
-    print(f"\n  Entry at {fmt(open_ts)} ET"
-          f" — {(open_ts - comp_end) // 60} min after compression ended")
-    print(f"  Exit PnL: {exit_pnl:+.2f}")
-
-
-TRADES = [
-    ("WIF PEAK_DECAY +$44",
-     "WIF_USDT", 0.17140,
-     ts("2026-07-06 20:45:44+00"),
-     ts("2026-07-06 20:56:08+00"),
-     43.76),
-
-    ("ADA TP1+RUNNER +$338",
-     "ADA_USDT", 0.18330,
-     ts("2026-07-06 21:07:32+00"),
-     ts("2026-07-06 21:10:59+00"),
-     338.25),
-
-    ("DOGE KILL -$101",
-     "DOGE_USDT", 0.076810,
-     ts("2026-07-06 23:31:13+00"),
-     ts("2026-07-07 00:08:59+00"),
-     -100.9),
-
-    ("XRP SE +$2",
-     "XRP_USDT", 0.11452,
-     ts("2026-07-06 23:46:08+00"),
-     ts("2026-07-07 00:00:43+00"),
-     2.18),
-
-    ("SOL 3C_LOWER_LOW +$98",
-     "SOL_USDT", 81.970,
-     ts("2026-07-06 23:55:43+00"),
-     ts("2026-07-07 00:30:05+00"),
-     97.6),
-
-    ("SUI PEAK_DECAY +$113",
-     "SUI_USDT", 0.74950,
-     ts("2026-07-07 00:00:29+00"),
-     ts("2026-07-07 00:28:44+00"),
-     113.41),
-
-    ("LINK PEAK_DECAY +$100",
-     "LINK_USDT", 8.0240,
-     ts("2026-07-07 00:16:22+00"),
-     ts("2026-07-07 00:29:40+00"),
-     99.7),
-]
-
-print("VOLUME AT COMPRESSION FORENSIC -- 7 trades")
-print(f"{len(TRADES)} trades\n")
-
-for t in TRADES:
-    try:
-        analyze(*t)
-    except Exception as e:
-        print(f"\n{t[0]}: ERROR {e}")
-
-print("\nAll done.")
+print("\nDone.")

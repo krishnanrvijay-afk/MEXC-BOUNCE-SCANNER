@@ -68,6 +68,7 @@ _signal_shadow: dict = {}  # trade_key -> signal invalidation shadow state (obse
 _signal_exhaustion_armed: dict = {}  # (key + "_se_armed") -> bool; SE arming state per trade
 _se_j1h_extreme: dict = {}  # key -> best J1H while cpnl > 0; LONGs: highest, SHORTs: lowest
 _candle_close_history: dict = {}
+_candle_high_history: dict = {}
 # keyed by trade key
 # value: list of last 3 candle
 # close PnL values in order
@@ -1785,6 +1786,7 @@ def _do_close_trade(key: str, trade: dict, exit_price: float, reason: str):
     _signal_exhaustion_armed.pop(key + "_se_armed", None)
     _se_j1h_extreme.pop(key, None)
     _candle_close_history.pop(key, None)
+    _candle_high_history.pop(key, None)
     _save_state()
 
 
@@ -2484,6 +2486,97 @@ async def _exit_monitor_loop():
                                     "3C_LOWER_LOW")
                                 # clean up history
                                 _candle_close_history\
+                                    .pop(key, None)
+                                continue
+
+                # ── 3H_LOWER_HIGH / 3L_HIGHER_LOW
+                # Fires when trade is ADVERSE
+                # (_cpnl <= 0) AND has NEVER
+                # been be_armed (price never
+                # crossed be_price threshold)
+                # AND 3 consecutive candle
+                # boundary prices are each lower
+                # than previous (LONG) or higher
+                # than previous (SHORT).
+                # Minimum age 180s.
+                # Complementary to 3C_LOWER_LOW
+                # which handles profitable trades.
+
+                _be_armed_flag = _sh.get(
+                    "be_armed", False)
+
+                if (_trade_age >= 180
+                        and _cpnl <= 0
+                        and not _be_armed_flag):
+
+                    _now_candle = (
+                        int(time.time())
+                        // 60) * 60
+
+                    _hh = _candle_high_history\
+                        .setdefault(key, {
+                            "last_candle_ts": 0,
+                            "prices": [],
+                        })
+
+                    if _now_candle > \
+                            _hh["last_candle_ts"]:
+                        _hh["prices"].append(
+                            current)
+                        if len(_hh["prices"]) > 3:
+                            _hh["prices"] = \
+                                _hh["prices"][-3:]
+                        _hh["last_candle_ts"] = \
+                            _now_candle
+
+                        if len(_hh["prices"]) >= 3:
+                            p1 = _hh["prices"][-3]
+                            p2 = _hh["prices"][-2]
+                            p3 = _hh["prices"][-1]
+
+                            if (not is_short
+                                    and p3 < p2 < p1):
+                                print(
+                                    f"[3H_LOWER_HIGH]"
+                                    f" {sym}"
+                                    f" {direction}"
+                                    f" prices="
+                                    f"[{p1:.5f},"
+                                    f"{p2:.5f},"
+                                    f"{p3:.5f}]"
+                                    f" cpnl={_cpnl:.2f}"
+                                    f" be_armed=False"
+                                    f" -- adverse"
+                                    f" lower highs"
+                                    f" exiting")
+                                _do_close_trade(
+                                    key, trade,
+                                    current,
+                                    "3H_LOWER_HIGH")
+                                _candle_high_history\
+                                    .pop(key, None)
+                                continue
+
+                            elif (is_short
+                                    and p3 > p2 > p1):
+                                print(
+                                    f"[3L_HIGHER_LOW]"
+                                    f" {sym}"
+                                    f" {direction}"
+                                    f" prices="
+                                    f"[{p1:.5f},"
+                                    f"{p2:.5f},"
+                                    f"{p3:.5f}]"
+                                    f" cpnl={_cpnl:.2f}"
+                                    f" be_armed=False"
+                                    f" -- adverse"
+                                    f" higher lows"
+                                    f" exiting")
+                                _do_close_trade(
+                                    key, trade,
+                                    current,
+                                    "3L_HIGHER_LOW")
+                                _candle_high_history\
                                     .pop(key, None)
                                 continue
 

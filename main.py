@@ -1004,6 +1004,14 @@ async def _do_open_trade(
             alert_data.get(
                 "btc_regime_context")
             if alert_data else None,
+        "depth_bid_pct":
+            alert_data.get(
+                "depth_bid_pct")
+            if alert_data else None,
+        "depth_ask_pct":
+            alert_data.get(
+                "depth_ask_pct")
+            if alert_data else None,
         "rsi15m":     alert_data.get("rsi15m")    if alert_data else None,
         "stoch_k":    alert_data.get("stoch_k")    if alert_data else None,
         "stoch_d":    alert_data.get("stoch_d")    if alert_data else None,

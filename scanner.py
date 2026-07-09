@@ -252,7 +252,8 @@ def score_bounce_short(j15m, j1h, ask_pct, adx,
     tier, lev = _leverage_tier(adx)
     stoch_gate = (j5m > 80 and j15m > 80)
     if not (j15m > J15M_SHORT_GATE and j1h > J1H_SHORT_MIN and j1h <= J1H_SHORT_MAX
-            and stoch_gate):
+            and stoch_gate
+            and (j1h_prev is None or j1h < j1h_prev)):
         return 0, tier, lev
     score = 4
     if j5m  > 80:              score += 2

@@ -730,75 +730,6 @@ async def _open_trade_log_row(trade: dict):
     except Exception as _e:
         print(f"[TRADE LOG WRITE FAILED] mexc_trade_log open-row: {_e}")
 
-
-# -- Paper trade Supabase logging ---------------------------------------------
-
-async def _save_paper_trade(trade: dict, alert: dict):
-    """Insert a row into bounce_paper_trades when a paper trade opens."""
-    if not PAPER_MODE or not _supabase:
-        return
-    try:
-        row = {
-            "pair":          trade["symbol"],
-            "direction":     trade["direction"],
-            "score":         alert.get("score"),
-            "tier":          trade.get("tier"),
-            "is_score10":    trade.get("is_score10", False),
-            "leverage":      trade.get("leverage"),
-            "margin":        trade.get("margin"),
-            "entry_price":   trade.get("entry_price"),
-            "sl_price":      trade.get("sl_price"),
-            "tp1_price":     trade.get("tp1_price"),
-            "tp2_price":     trade.get("tp2_price"),
-            "sl_pct":        round(trade.get("sl_dist", 0) / trade.get("entry_price", 1), 6)
-                             if trade.get("entry_price") else None,
-            "adx":           alert.get("adx1h"),
-            "trend":         alert.get("trend"),
-            "j_value":       alert.get("j15m"),
-            "rsi":           alert.get("rsi15m"),
-            "stoch_k":       alert.get("stoch_k"),
-            "stoch_d":       alert.get("stoch_d"),
-            "fired_at":      datetime.fromtimestamp(
-                                 trade.get("opened_at", int(time.time())), tz=timezone.utc
-                             ).isoformat(),
-            "session":       trade.get("session", ""),
-            "paper_mode":    True,
-            "status":        "OPEN",
-        }
-        await asyncio.to_thread(
-            lambda: _supabase.table("bounce_paper_trades").insert(row).execute()
-        )
-    except Exception as e:
-        print(f"[TRADE LOG WRITE FAILED] {e}")
-
-
-async def _update_paper_trade_close(trade: dict, exit_price: float,
-                                    reason: str, pnl: float):
-    """Update the bounce_paper_trades row when a paper trade closes."""
-    if not PAPER_MODE or not _supabase:
-        return
-    try:
-        opened_at = trade.get("opened_at", int(time.time()))
-        duration  = round((int(time.time()) - opened_at) / 60, 1)
-        await asyncio.to_thread(
-            lambda: _supabase.table("bounce_paper_trades")
-                    .update({
-                        "close_price":      exit_price,
-                        "close_reason":     reason,
-                        "pnl":              round(pnl, 2),
-                        "duration_minutes": duration,
-                        "status":           "WIN" if pnl >= 0 else "LOSS",
-                        "closed_at":        datetime.now(timezone.utc).isoformat(),
-                    })
-                    .eq("pair",      trade["symbol"])
-                    .eq("direction", trade["direction"])
-                    .eq("status",    "OPEN")
-                    .execute()
-        )
-    except Exception as e:
-        print(f"[TRADE LOG WRITE FAILED] {e}")
-
-
 async def _resolve_bot_identity(exchange: str) -> None:
     """Resolve BOT_INSTANCE_ID from Supabase bot_identity table or env-var fallback.
 
@@ -1074,8 +1005,6 @@ async def _do_open_trade(
     app_state.margin_deployed += margin_usdc
     app_state.trades_opened   += 1
 
-    if PAPER_MODE and alert_data:
-        asyncio.create_task(_save_paper_trade(trade, alert_data))
     asyncio.create_task(_open_trade_log_row(trade))
     asyncio.create_task(
         _log_alert_outcome(
@@ -1833,8 +1762,6 @@ def _do_close_trade(key: str, trade: dict, exit_price: float, reason: str):
                     _tg_post("\U0001F535 " + s + " " + sl_lbl + " \u00B7 closed (" + r + ") at " + _fmt_p(ep)
                              + "\n" + ("+" if p >= 0 else "-") + "$" + f"{abs(p):.2f}")
             threading.Thread(target=_exit_tg, daemon=True).start()
-    if PAPER_MODE:
-        asyncio.create_task(_update_paper_trade_close(trade, exit_price, reason, pnl))
     asyncio.create_task(_write_peak_shadow_row(key, trade, reason, pnl))
     asyncio.create_task(_write_adverse_shadow_row(key, trade, reason, pnl, r))
     asyncio.create_task(_write_sign_shadow_rows(key, trade, reason, pnl))

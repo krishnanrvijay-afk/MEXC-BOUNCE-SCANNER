@@ -2014,7 +2014,7 @@ async def _exit_monitor_loop():
                             (_sl_sp - current) / _entry_sp)
                     if (_sl_distance_pct > 0 and
                             _price_to_sl_pct <=
-                            _sl_distance_pct * 0.20):
+                            _sl_distance_pct * 0.40):
                         print(
                             f"[SL_PROXIMITY] {sym} {direction}"
                             f" price={current}"
@@ -2582,7 +2582,7 @@ async def _exit_monitor_loop():
                     else:
                         _mfe_r_cur = 0.0
 
-                    if _mfe_r_cur < 0.05:
+                    if _mfe_r_cur < 0.15:
                         print(
                             f"[TIME_ADVERSE_EXIT]"
                             f" {sym} {direction}"

@@ -489,6 +489,10 @@ def _load_state():
         for key, sh in (data.get("peak_shadow") or {}).items():
             if key in app_state.open_trades:
                 _peak_shadow[key] = sh
+        _now_candle_restore = (int(time.time()) // 60) * 60
+        for sh in _peak_shadow.values():
+            if not sh.get("last_peak_candle_ts"):
+                sh["last_peak_candle_ts"] = _now_candle_restore
         for key, sh in (data.get("adverse_shadow") or {}).items():
             if key in app_state.open_trades:
                 _adverse_shadow[key] = sh
@@ -2329,13 +2333,11 @@ async def _exit_monitor_loop():
                       _decay_threshold = 0.70 \
                           if sym in ("@107",) else 0.80
 
-                      _peak_age = (
+                      _now_candle_ts = (
                           int(time.time())
-                          - _sh.get("peak_set_at_ts", 0))
-                      if _peak_age < 300:
-                          pass  # skip decay check this cycle
-                      else:
-                          # Ã¢ÂÂÃ¢ÂÂ Before TP1: PEAK_DECAY_20 on both directions Ã¢ÂÂÃ¢ÂÂ
+                          // 60) * 60
+                      if _sh.get("last_peak_candle_ts", 0) != _now_candle_ts:
+                          # -- Before TP1: PEAK_DECAY_20 on both directions --
                           if not tp1_hit:
                               if _cpnl < _sh["peak_pnl_usd"] \
                                       * _decay_threshold:
@@ -2349,20 +2351,20 @@ async def _exit_monitor_loop():
                                       current, reason)
                                   continue
 
-                      # Ã¢ÂÂÃ¢ÂÂ After TP1: PEAK_DECAY_10 on runner both directions Ã¢ÂÂÃ¢ÂÂ
-                      if tp1_hit:
-                          _runner_decay = 0.90
-                          if _cpnl < _sh["peak_pnl_usd"] \
-                                  * _runner_decay:
-                              reason = "PEAK_DECAY_10"
-                              print(f"[PEAK_DECAY_10] "
-                                    f"{sym} {direction} "
-                                    f"peak={_sh['peak_pnl_usd']:.2f} "
-                                    f"cpnl={_cpnl:.2f} "
-                                    f"-- post-TP1 runner")
-                              _do_close_trade(key, trade,
-                                  current, reason)
-                              continue
+                          # -- After TP1: PEAK_DECAY_10 on runner both directions --
+                          if tp1_hit:
+                              _runner_decay = 0.90
+                              if _cpnl < _sh["peak_pnl_usd"] \
+                                      * _runner_decay:
+                                  reason = "PEAK_DECAY_10"
+                                  print(f"[PEAK_DECAY_10] "
+                                        f"{sym} {direction} "
+                                        f"peak={_sh['peak_pnl_usd']:.2f} "
+                                        f"cpnl={_cpnl:.2f} "
+                                        f"-- post-TP1 runner")
+                                  _do_close_trade(key, trade,
+                                      current, reason)
+                                  continue
 
                 # ── 3-CANDLE LOWER LOW EXIT ──
                 # Fires when 3 consecutive

@@ -382,8 +382,9 @@ def compute_market_health(pair_states: list[dict], recent_trades: list[dict]) ->
 
 # -- Main scan -----------------------------------------------------------------
 
-async def run_full_scan(client, market_health: Optional[dict] = None) -> list[dict]:
+async def run_full_scan(client, market_health: Optional[dict] = None, open_trades: dict = None) -> list[dict]:
     global _scan_count
+    _open_trades_ref = open_trades if open_trades is not None else {}
 
     _scan_count += 1
     if _scan_count < 3:
@@ -557,6 +558,9 @@ async def run_full_scan(client, market_health: Optional[dict] = None) -> list[di
                             f"{_cd}s remaining"))
                     continue
 
+                # Skip scoring if trade already open — prevents BLOCKED_DUPLICATE noise
+                if key in _open_trades_ref:
+                    continue
 
                 if direction == "SHORT":
                     g_j15m  = j15m > J15M_SHORT_GATE
@@ -620,17 +624,19 @@ async def run_full_scan(client, market_health: Optional[dict] = None) -> list[di
                         f" depth_ask={ask_pct:.1f}%"
                     )
 
-                # -- GATE3 log - every scan when >= 3 of 4 gates pass ------------
+                # -- GATE_FAIL log - every scan when >= 3 of 4 gates pass ------------
                 _gate_list  = [g_j15m, g_j1h, g_stoch, g_depth]
                 _gate_count = sum(_gate_list)
                 _blocked    = [n for n, v in zip(["J15M", "J1H", "STOCH", "DEPTH"], _gate_list) if not v]
                 if _gate_count >= 3:
                     log.info(
-                        f"[GATE3] {symbol} {direction} "
-                        f"stoch_k={stoch_k:.1f} stoch_d={stoch_d:.1f} rsi={rsi15m:.1f} "
-                        f"passed={'true' if _gate_count == 4 else 'false'} "
-                        f"blocked_gates={_blocked}"
-                    )
+                        f"[GATE_FAIL] {symbol}"
+                        f" {direction}"
+                        f" j5m={j5m:.1f}"
+                        f" j15m={j15m:.1f}"
+                        f" bid={bid_pct:.1f}%"
+                        f" blocked="
+                        f"{_blocked}")
 
                 if score >= 4:
                     log.info(f"[SCORE] {symbol} {direction} gates=PASS score={score} {_log_gates}")

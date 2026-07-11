@@ -2067,16 +2067,9 @@ async def _exit_monitor_loop():
                                    else False)
                     if _be_crossed:
                         _sh["be_armed"] = True
-                    # Age-based candle boundary for PEAK_DECAY_20:
-                    # < 300s (5 min) -> 1M boundary
-                    # >= 300s (5 min) -> 5M boundary
-                    _pd_boundary = (
-                        60 if _elapsed < 300
-                        else 300)
                     _now_candle_ts = (
                         int(time.time())
-                        // _pd_boundary
-                        ) * _pd_boundary
+                        // 60) * 60
                     if (_sh["be_armed"] and _cpnl > _sh["peak_pnl_usd"]
                             and _now_candle_ts > _sh["last_peak_candle_ts"]):
                         _sh["peak_pnl_usd"]    = _cpnl
@@ -2382,7 +2375,7 @@ async def _exit_monitor_loop():
 
                     _now_candle = (
                         int(time.time())
-                        // 300) * 300
+                        // 60) * 60
 
                     _ch = _candle_close_history\
                         .setdefault(key, {

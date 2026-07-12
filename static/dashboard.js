@@ -47,6 +47,8 @@ async function fetchState() {
     }
 
     render();
+    const dot = document.getElementById('pulse-dot');
+    if (dot) dot.className = STATE.fleet_halt ? 'pulse-dot halted' : 'pulse-dot live';
   } catch (e) { /* network blip */ }
 }
 setInterval(fetchState, 2000);
@@ -108,7 +110,7 @@ function _fmtET(epochSeconds, includeDate, includeSeconds) {
 }
 
 function updateScanStatus() {
-  const el = document.getElementById('scan-status');
+  const el = document.getElementById('scan-status-text');
   if (!el) return;
   if (!lastScanAt) { el.innerHTML = 'waiting for scan'; return; }
   const ts = _fmtET(lastScanAt, false, true);

@@ -68,6 +68,14 @@ BLOCKED_PAIR_SESSIONS: dict = {
     ("AVAX_USDT", "SHORT", "ASIA"): True,
     # NEW -- data: SUI_USDT SHORT ASIA: 0% WR -$165 (back-to-back 3L exits)
     ("SUI_USDT",  "SHORT", "ASIA"): True,
+    # R1 -- ADA_USDT all sessions LONG+SHORT: 6 trades 17% WR -$288.96 MEXC
+    # Worst performing pair on MEXC; consistent losses across all sessions and directions
+    ("ADA_USDT",  "LONG",  "ASIA"): True,
+    ("ADA_USDT",  "LONG",  "EU"):   True,
+    ("ADA_USDT",  "LONG",  "US"):   True,
+    ("ADA_USDT",  "SHORT", "ASIA"): True,
+    ("ADA_USDT",  "SHORT", "EU"):   True,
+    ("ADA_USDT",  "SHORT", "US"):   True,
 }
 
 PLACE_EXCHANGE_SL      = True

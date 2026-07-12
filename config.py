@@ -76,6 +76,14 @@ BLOCKED_PAIR_SESSIONS: dict = {
     ("ADA_USDT",  "SHORT", "ASIA"): True,
     ("ADA_USDT",  "SHORT", "EU"):   True,
     ("ADA_USDT",  "SHORT", "US"):   True,
+    # R9: ZEC — -$61 combined loss (HL -$29, MEXC -$32), chronically low volume
+    # Volume rarely exceeds $500K/24h threshold; block all sessions/directions
+    ("ZEC_USDT", "LONG",  "ASIA"): True,
+    ("ZEC_USDT", "LONG",  "EU"):   True,
+    ("ZEC_USDT", "LONG",  "US"):   True,
+    ("ZEC_USDT", "SHORT", "ASIA"): True,
+    ("ZEC_USDT", "SHORT", "EU"):   True,
+    ("ZEC_USDT", "SHORT", "US"):   True,
 }
 
 PLACE_EXCHANGE_SL      = True

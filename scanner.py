@@ -632,6 +632,14 @@ async def run_full_scan(client, market_health: Optional[dict] = None, open_trade
                             "MEXC", symbol, "SHORT_EU_J1H_HIGH", direction,
                             f"EU j1h={j1h:.1f} >= 78 — trend continuation not reversal"))
                         continue
+                    # Gate 3b: J15M extreme overbought ceiling
+                    # Data: j15m>115 = 0% WR, squeeze risk -- extreme OB can extend
+                    if j15m > J15M_SHORT_CEILING:
+                        asyncio.create_task(_log_gate(
+                            "MEXC", symbol, "J15M_EXTREME_OB", direction,
+                            f"j15m={j15m:.1f} > J15M_SHORT_CEILING={J15M_SHORT_CEILING}"
+                            f" -- extreme overbought, squeeze can extend"))
+                        continue
                     # Gate 3: SHORT_J1H_FLOOR
                     # J1H < 45: shorting into 1H oversold — no reversal context
                     # Evidence: 7/12 AVAX EU j1h=35 -$129, 3L_HIGHER_LOW in 7min
@@ -639,6 +647,20 @@ async def run_full_scan(client, market_health: Optional[dict] = None, open_trade
                         asyncio.create_task(_log_gate(
                             "MEXC", symbol, "SHORT_J1H_FLOOR", direction,
                             f"j1h={j1h:.1f} < 45 — 1H oversold, no reversal context"))
+                        continue
+                    # MA-stack gate for SHORTs
+                    # Data: 3L_HIGHER_LOW 20 trades 0% WR -$744, all in BULL ma_stack
+                    # Block SHORTs when 1H trend structure is bullish aligned
+                    _ma_stack_now = (
+                        "BULL" if (ma10 and ma30 and ma60 and ma10 > ma30 > ma60) else
+                        "BEAR" if (ma10 and ma30 and ma60 and ma10 < ma30 < ma60)
+                        else "MIXED"
+                    )
+                    if _ma_stack_now == "BULL":
+                        asyncio.create_task(_log_gate(
+                            "MEXC", symbol, "MA_STACK_BULL_BLOCK", direction,
+                            f"ma10={ma10:.4f} ma30={ma30:.4f} ma60={ma60:.4f}"
+                            f" -- 1H uptrend, SHORT reversal invalid"))
                         continue
                     # J1H ceiling gate (enforced) — blocks SHORTs above valid bounce zone
                     # Lower bound (j1h<=30) removed: SHORT_J1H_FLOOR (j1h<45) already covers it
@@ -706,6 +728,14 @@ async def run_full_scan(client, market_health: Optional[dict] = None, open_trade
                             "MEXC", symbol, "BTC_MACRO_FALL", direction,
                             f"btc_j1h={_btc_j1h:.1f} < "
                             f"{_btc_j1h_history[-10]:.1f} 10 scans ago"))
+                        continue
+                    # J15M freefall floor gate
+                    # Data: j15m < -10 = 22% WR -$278 (entries into free-fall)
+                    if j15m < J15M_LONG_FLOOR:
+                        asyncio.create_task(_log_gate(
+                            "MEXC", symbol, "J15M_FREEFALL", direction,
+                            f"j15m={j15m:.1f} < J15M_LONG_FLOOR={J15M_LONG_FLOOR}"
+                            f" -- freefall, no bounce context"))
                         continue
                     score, tier, lev = score_bounce_long(
                         j15m, j1h, bid_pct, adx1h, j5m=j5m, trend=trend,
@@ -840,7 +870,7 @@ async def run_full_scan(client, market_health: Optional[dict] = None, open_trade
                 # Co-fire limiter: cap same-direction signals per scan at 5
                 # Evidence: 7/12 02:06-02:14 — 12 LONG co-fires in 8 min, 0/12 WR -$759
                 _cofire_n = sum(1 for _ca in new_alerts if _ca["direction"] == direction)
-                if _cofire_n >= 5:
+                if _cofire_n >= 3:   # tighter: data shows 3+ co-fires = 0% WR -$759
                     log.info(
                         f"[COFIRE_LIMIT] {symbol} {direction} "
                         f"skipped — {_cofire_n} {direction} signals "

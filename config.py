@@ -76,6 +76,7 @@ MIN_SL_PCT: dict = {
     "NEAR": 0.010,
     "LINK": 0.008,
     "ARB":  0.012,
+    "ZEC":  0.030,   # matches HL — ZEC ASIA volatility 2-4%; default 1% caused -$211.80 SL 7/12
 }
 MIN_SL_PCT_DEFAULT = 0.010
 # Per-pair per-session Sentinel minimum peak thresholds (as fraction of notional)

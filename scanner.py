@@ -724,6 +724,20 @@ async def run_full_scan(client, market_health: Optional[dict] = None, open_trade
                             "MEXC", symbol, "RSI_CEILING_FAIL", direction,
                             f"rsi15m={rsi15m:.1f} need<{RSI15M_LONG_MAX}"))
                         continue
+                    # MA-stack gate for LONGs
+                    # Symmetric to MA_STACK_BULL_BLOCK for SHORTs (data: 20 trades 0% WR -$744)
+                    # BEAR stack (ma10<ma30<ma60) = 1H confirmed downtrend -- LONG reversal fails
+                    _ma_stack_long = (
+                        "BULL" if (ma10 and ma30 and ma60 and ma10 > ma30 > ma60) else
+                        "BEAR" if (ma10 and ma30 and ma60 and ma10 < ma30 < ma60)
+                        else "MIXED"
+                    )
+                    if _ma_stack_long == "BEAR":
+                        asyncio.create_task(_log_gate(
+                            "MEXC", symbol, "MA_STACK_BEAR_BLOCK", direction,
+                            f"ma10={ma10:.4f} ma30={ma30:.4f} ma60={ma60:.4f}"
+                            f" -- 1H downtrend confirmed, LONG reversal invalid"))
+                        continue
                     # BTC macro downtrend LONG gate — symmetric to SHORT uptrend gate
                     # Block LONGs when BTC J1H is lower now than 10 scans ago (5 min)
                     # Evidence: 7/12 02:06-02:14 cascade — 16 trades 0/16 WR -$759

@@ -629,14 +629,6 @@ async def run_full_scan(client, market_health: Optional[dict] = None, open_trade
                             "MEXC", symbol, "SHORT_US_HALT", direction,
                             f"US session — 0% WR historical, -$1,570 net"))
                         continue
-                    # R7: Blanket ASIA SHORT block
-                    # Data: ASIA SHORT WR consistently <30% — low liquidity + BTC rises in Asian hours
-                    # Retains ASIA LONGs which have positive expectancy
-                    if _cur_sess == "ASIA":
-                        asyncio.create_task(_log_gate(
-                            "MEXC", symbol, "SHORT_ASIA_HALT", direction,
-                            f"ASIA session — structurally weak SHORTs, low liquidity"))
-                        continue
                     # Gate 2: SHORT_EU_J1H_HIGH
                     # EU + J1H >= 78: 5 losses 1 win, -$1,062 net
                     # High J1H in EU = trend has continuation room; exhaustion reversal fails

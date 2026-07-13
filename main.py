@@ -2319,8 +2319,8 @@ async def _exit_monitor_loop():
                 _sentinel_min = _notional * _sentinel_pct
                 if _sh["be_armed"] and \
                           _sh["peak_pnl_usd"] >= _sentinel_min:
-                      _decay_threshold = 0.70 \
-                          if sym in ("@107",) else 0.80
+                      _decay_threshold = 0.80 \
+                          if sym in ("@107",) else 0.90
 
                       _now_candle_ts = (
                           int(time.time())

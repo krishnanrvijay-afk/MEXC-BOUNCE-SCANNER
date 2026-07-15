@@ -1246,7 +1246,8 @@ async def _scan_loop():
                 await asyncio.sleep(
                     SCAN_INTERVAL_SECONDS)
                 continue
-            new_alerts = await run_full_scan(mexc_client, market_health=app_state.market_health, open_trades=app_state.open_trades)
+            _scan_result = await run_full_scan(mexc_client, market_health=app_state.market_health, open_trades=app_state.open_trades)
+            new_alerts, _pair_states = _scan_result if isinstance(_scan_result, tuple) else (_scan_result, [])
             # -- BTC flash TG alert -- fires once per flash event when block arms --------
             if _scanner_mod._btc_flash_tg_pending[0]:
                 _scanner_mod._btc_flash_tg_pending[0] = False
@@ -1270,7 +1271,7 @@ async def _scan_loop():
                 print(f"[SESSION RESET] {_prev_session} session ended - clearing all session halts.")
             _prev_session = _curr_sess
             app_state.last_scan_at = int(time.time())
-            app_state.pair_states  = await scan_pair_state(mexc_client)
+            app_state.pair_states  = _pair_states if _pair_states else await scan_pair_state(mexc_client)
             app_state.market_health = compute_market_health(
                 app_state.pair_states, list(app_state.trade_log)
             )

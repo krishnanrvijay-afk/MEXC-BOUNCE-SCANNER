@@ -6,7 +6,9 @@ from datetime import datetime, timezone
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
 
-PAIRS = ["LINK_USDT","SOL_USDT","BTC_USDT","ETH_USDT","XRP_USDT","DOGE_USDT","SUI_USDT","NEAR_USDT","AVAX_USDT","ARB_USDT","WIF_USDT","HYPE_USDT","LTC_USDT","ADA_USDT","ZEC_USDT"]
+# BTC_USDT first — ensures fresh regime/flash data before all other pairs
+# ADA_USDT + ZEC_USDT removed: all-session blocks on both venues, persistent losses
+PAIRS = ["BTC_USDT","LINK_USDT","SOL_USDT","ETH_USDT","XRP_USDT","DOGE_USDT","SUI_USDT","NEAR_USDT","AVAX_USDT","ARB_USDT","WIF_USDT","HYPE_USDT","LTC_USDT"]
 
 SCAN_INTERVAL_SECONDS  = 30
 PRICE_INTERVAL_SECONDS = 8

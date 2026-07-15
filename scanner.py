@@ -64,6 +64,7 @@ _scan_count:  int              = 0
 _fleet_halt:  bool             = False  # set by fleet-scorecard halt API via Supabase
 _stale_prices: set[str]        = set()  # symbols with 5+ consecutive missing prices
 _stale_counts: dict[str, int]  = {}     # per-symbol consecutive no-price scan counter
+_candle_cache: dict             = {}     # "SYMBOL_tf" -> (candles, expires_at_epoch)
 _btc_j1h: float = 50.0
 _btc_j1h_history: list = []  # Tracks last 12 BTC J1H values — ~10-15 minutes of macro trend
 BTC_CORRELATION: dict = {
@@ -74,6 +75,18 @@ BTC_CORRELATION: dict = {
 
 
 # -- Indicator helpers ---------------------------------------------------------
+
+def _cache_get(symbol: str, tf: str):
+    """Return cached candles if TTL not expired, else None."""
+    entry = _candle_cache.get(f"{symbol}_{tf}")
+    if entry and time.time() < entry[1]:
+        return entry[0]
+    return None
+
+
+def _cache_set(symbol: str, tf: str, candles: list, ttl: int) -> None:
+    _candle_cache[f"{symbol}_{tf}"] = (candles, time.time() + ttl)
+
 
 def _compute_kdj(candles: list[dict], period: int = 9) -> tuple[float, float, float]:
     if len(candles) < period:
@@ -419,14 +432,14 @@ async def run_full_scan(client, market_health: Optional[dict] = None, open_trade
     _open_trades_ref = open_trades if open_trades is not None else {}
 
     _scan_count += 1
-    if _scan_count < 3:
+    if _scan_count < 2:
         print(
             f"[WARMUP] scan "
-            f"#{_scan_count}/3 — "
+            f"#{_scan_count}/2 — "
             f"KDJ initializing, "
             f"skipping signal "
             f"evaluation")
-        return []
+        return [], []
 
     # Fleet halt check
     # Reads from scanner state
@@ -455,13 +468,14 @@ async def run_full_scan(client, market_health: Optional[dict] = None, open_trade
             "[FLEET HALT] active"
             " — signal generation"
             " suspended")
-        return []
+        return [], []
 
-    new_alerts: list[dict] = []
+    new_alerts:  list[dict] = []
+    pair_states: list[dict] = []  # populated each scan; replaces scan_pair_state() sweep
 
     for symbol in PAIRS:
         try:
-            await asyncio.sleep(0.5)  # rate-limit spacing - 12 pairs x 0.5s = 6s minimum spread
+            await asyncio.sleep(0.2)  # rate-limit spacing - 12 pairs x 0.5s = 6s minimum spread
             candles_1m, candles_5m, candles_15m, candles_1h, book, price = await _fetch_pair_data(client, symbol)
 
             if not price or price == 0:
@@ -560,11 +574,9 @@ async def run_full_scan(client, market_health: Optional[dict] = None, open_trade
             _flash_thresholds = {"ASIA": 0.0030, "EU": 0.0055, "US": 0.0050}
             _cur_session  = get_session_name()
             _flash_thresh = _flash_thresholds.get(_cur_session, 0.0050)
-            try:
-                _btc_sym = "BTC_USDT"
-                _btc_1m = await client.get_candles(_btc_sym, "1m", 3)
-                if _btc_1m and len(_btc_1m) >= 2:
-                    _lc = _btc_1m[-2]
+            try:  # uses already-fetched candles_1m — no extra API call
+                if candles_1m and len(candles_1m) >= 2:
+                    _lc = candles_1m[-2]
                     _body_pct = abs(
                         float(_lc["close"]) - float(_lc["open"])
                     ) / float(_lc["open"])
@@ -576,7 +588,7 @@ async def run_full_scan(client, market_health: Optional[dict] = None, open_trade
                         _btc_flash_tg_pending[0] = True
                         _regime_block_long = True
                         asyncio.create_task(_log_gate(
-                            "MEXC", _btc_sym, "BTC_FLASH_BLOCK", "LONG",
+                            "MEXC", symbol, "BTC_FLASH_BLOCK", "LONG",
                             f"1m body={_body_pct*100:.2f}% "
                             f">= {_flash_thresh*100:.2f}% "
                             f"session={_cur_session} LONGs blocked 5min"))
@@ -598,6 +610,25 @@ async def run_full_scan(client, market_health: Optional[dict] = None, open_trade
                     _now_utc < _btc_flash_block_until["long"]):
                 _regime_block_long = True
 
+            # Accumulate pair state -- replaces scan_pair_state() second sweep
+            _s_raw, _, _ = score_bounce_short(j15m, j1h, ask_pct, adx1h, j5m=j5m, trend=trend)
+            _l_raw, _, _ = score_bounce_long( j15m, j1h, bid_pct, adx1h, j5m=j5m, trend=trend)
+            pair_states.append({
+                "symbol":       symbol,
+                "price":        price,
+                "j5m":          round(j5m,   2),
+                "j15m":         round(j15m,  2),
+                "j1h":          round(j1h,   2),
+                "rsi15m":       round(rsi15m, 2),
+                "adx1h":        round(adx1h, 2),
+                "bid_pct":      bid_pct,
+                "ask_pct":      ask_pct,
+                "trend":        trend,
+                "short_score":  _s_raw,
+                "long_score":   _l_raw,
+                "cooldown_short": get_cooldown_remaining(symbol, "SHORT"),
+                "cooldown_long":  get_cooldown_remaining(symbol, "LONG"),
+            })
             for direction in ("SHORT", "LONG"):
                 key = f"{symbol}{direction}"
                 _cur_sess = get_session_name()
@@ -935,8 +966,8 @@ async def run_full_scan(client, market_health: Optional[dict] = None, open_trade
         except Exception as e:
             log.error(f"[SCAN] {symbol} error: {e}", exc_info=True)
 
-    log.info(f"[SCAN] #{_scan_count} complete - {len(new_alerts)} new alerts")
-    return new_alerts
+    log.info(f"[SCAN] #{_scan_count} complete -- {len(new_alerts)} signals, {len(pair_states)} pair states")
+    return new_alerts, pair_states
 
 
 async def scan_pair_state(client) -> list[dict]:
@@ -944,7 +975,7 @@ async def scan_pair_state(client) -> list[dict]:
     states = []
     for symbol in PAIRS:
         try:
-            await asyncio.sleep(0.5)  # rate-limit spacing between pairs
+            await asyncio.sleep(0.2)  # rate-limit spacing between pairs
             candles_1m, candles_5m, candles_15m, candles_1h, book, price = await _fetch_pair_data(client, symbol)
             if not price:
                 await asyncio.sleep(2)
@@ -1050,15 +1081,27 @@ def _compute_session_vwap(candles_15m: list, entry_price: float):
 
 
 async def _fetch_pair_data(client, symbol: str):
-    candles_1m, candles_5m, candles_15m, candles_1h, book, price = await asyncio.gather(
-        client.get_candles(symbol, "1m",  30),
-        client.get_candles(symbol, "5m",  100),
-        client.get_candles(symbol, "15m", 100),
-        client.get_candles(symbol, "1h",  100),
-        client.get_orderbook(symbol, 20),
-        client.get_price(symbol),
-    )
-    return candles_1m, candles_5m, candles_15m, candles_1h, book, price
+    """Fetch pair data; 15m/1h/5m candles served from cache when fresh."""
+    c5m  = _cache_get(symbol, "5m")
+    c15m = _cache_get(symbol, "15m")
+    c1h  = _cache_get(symbol, "1h")
+    tasks = [client.get_candles(symbol, "1m", 30)]
+    need_5m  = c5m  is None
+    need_15m = c15m is None
+    need_1h  = c1h  is None
+    if need_5m:  tasks.append(client.get_candles(symbol, "5m",  100))
+    if need_15m: tasks.append(client.get_candles(symbol, "15m", 100))
+    if need_1h:  tasks.append(client.get_candles(symbol, "1h",  100))
+    tasks.extend([client.get_orderbook(symbol, 20), client.get_price(symbol)])
+    results = await asyncio.gather(*tasks)
+    idx = 0
+    candles_1m = results[idx]; idx += 1
+    if need_5m:  c5m  = results[idx]; idx += 1; _cache_set(symbol, "5m",  c5m,  180)
+    if need_15m: c15m = results[idx]; idx += 1; _cache_set(symbol, "15m", c15m, 360)
+    if need_1h:  c1h  = results[idx]; idx += 1; _cache_set(symbol, "1h",  c1h,  900)
+    book  = results[idx]; idx += 1
+    price = results[idx]
+    return candles_1m, c5m, c15m, c1h, book, price
 
 
 def log_startup_config():

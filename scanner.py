@@ -55,6 +55,7 @@ def _base(sym):
 _last_stoch:  dict[str, tuple] = {}   # keyed symbol -> (stoch_k, stoch_d) from previous scan
 _last_stoch_fast: dict[str, tuple] = {}   # keyed symbol -> (stoch_k_fast, stoch_d_fast) 8,3,3
 _adverse_cluster: dict = {"long": [], "short": []}  # rolling adverse exit timestamps per direction
+_consec_adverse:  dict = {"long": 0,  "short": 0}   # consecutive KILL/DEAD_TRADE_KILL counter per direction
 _adverse_cooldown_until: dict = {"long": None, "short": None}  # graduated adverse cooldown expiry per direction
 _btc_flash_block_until: dict = {"long": None}                  # expiry for BTC 1m flash crash LONG block
 _flash_closed: set = set()                                      # trade keys already force-closed this flash event
@@ -464,6 +465,25 @@ async def run_full_scan(client, market_health: Optional[dict] = None, open_trade
                             "fleet_halt", False))
         except Exception:
             pass
+    # -- Directional halt toggles: halt_long / halt_short --
+    _fleet_halt_long  = False
+    _fleet_halt_short = False
+    if _SB_URL and _SB_KEY:
+        try:
+            import httpx as _httpx_dh
+            async with _httpx_dh.AsyncClient(timeout=2.0) as _hc_dh:
+                _dh = await _hc_dh.get(
+                    f"{_SB_URL}/rest/v1/hl_scanner_state",
+                    params={"select": "halt_long,halt_short",
+                            "id": "eq.1", "limit": "1"},
+                    headers={"apikey": _SB_KEY,
+                             "Authorization": f"Bearer {_SB_KEY}"},
+                )
+                if _dh.status_code == 200 and _dh.json():
+                    _fleet_halt_long  = bool(_dh.json()[0].get("halt_long",  False))
+                    _fleet_halt_short = bool(_dh.json()[0].get("halt_short", False))
+        except Exception:
+            pass
     if _fleet_halt:
         log.info(
             "[FLEET HALT] active"
@@ -588,6 +608,7 @@ async def run_full_scan(client, market_health: Optional[dict] = None, open_trade
                         _flash_closed.clear()
                         _btc_flash_tg_pending[0] = True
                         _regime_block_long = True
+                        _consec_adverse["long"] = 3  # BTC crash arms LONG halt immediately
                         asyncio.create_task(_log_gate(
                             "MEXC", symbol, "BTC_FLASH_BLOCK", "LONG",
                             f"1m body={_body_pct*100:.2f}% "
@@ -610,6 +631,20 @@ async def run_full_scan(client, market_health: Optional[dict] = None, open_trade
             if (_btc_flash_block_until.get("long") and
                     _now_utc < _btc_flash_block_until["long"]):
                 _regime_block_long = True
+            # -- Consecutive kill halt: release if BTC CLEAR, block if >= 3 --
+            if _consec_adverse.get("long",  0) >= 3 and _btc_regime_context == "CLEAR":
+                _consec_adverse["long"]  = 0
+            if _consec_adverse.get("short", 0) >= 3 and _btc_regime_context == "CLEAR":
+                _consec_adverse["short"] = 0
+            if _consec_adverse.get("long",  0) >= 3:
+                _regime_block_long  = True
+            if _consec_adverse.get("short", 0) >= 3:
+                _regime_block_short = True
+            # Fleet directional toggles (manual dashboard override)
+            if _fleet_halt_long:
+                _regime_block_long  = True
+            if _fleet_halt_short:
+                _regime_block_short = True
 
             # Accumulate pair state -- replaces scan_pair_state() second sweep
             _s_raw, _, _ = score_bounce_short(j15m, j1h, ask_pct, adx1h, j5m=j5m, trend=trend)

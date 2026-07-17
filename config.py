@@ -148,7 +148,7 @@ SENTINEL_MIN_PEAK_PCT: dict = {
     ("ZEC_USDT",   "EU"):   0.0033,
     ("ZEC_USDT",   "US"):   0.0025,
 }
-SENTINEL_MIN_PEAK_PCT_DEFAULT: float = 0.0018
+SENTINEL_MIN_PEAK_PCT_DEFAULT: float = 0.0010
 
 PAIR_COOLDOWN_SECONDS: int = 1800
 # Post-KILL cooldown -- blocks re-entry

@@ -75,3 +75,16 @@ def get_position_count() -> int:
     if not data.get("success"):
         return 0
     return len(data.get("data", []))
+
+
+def get_open_position_size(symbol: str):
+    """Return current open position size on MEXC for `symbol`.
+    0.0 = no position. None = API error (skip check)."""
+    data = _get("/api/v1/private/position/open_positions")
+    if not data.get("success"):
+        return None  # API error — skip check
+    for pos in data.get("data", []):
+        if pos.get("symbol") == symbol:
+            return abs(float(pos.get("holdVol", 0)))
+    return 0.0  # symbol not found = fully closed
+

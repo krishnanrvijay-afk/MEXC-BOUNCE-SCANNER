@@ -67,6 +67,11 @@ _normal_count    = 0
 # -- Injected dependency ------------------------------------------------------
 _get_supabase_fn = None
 
+# -- Fleet signal state (Phase A/C) ------------------------------------------
+_last_metrics:       dict           = {}
+_vel_history:        "deque[float]" = deque(maxlen=20)
+_fleet_exit_signal:  bool           = False
+
 
 def init(venue: str, get_supabase_fn) -> None:
     global _VENUE, _get_supabase_fn
@@ -216,6 +221,21 @@ def _sb_exec_log(summary: dict) -> None:
 
 # -- Public API ---------------------------------------------------------------
 
+
+def _compute_fleet_exit(m: dict) -> bool:
+    """True when a confirmed cascade/squeeze is exhausting. Phase C fleet exit signal."""
+    if len(_vel_history) < 8:
+        return False
+    recent    = list(_vel_history)
+    last10    = recent[-min(10, len(recent)):]
+    short_cas = sum(1 for v in last10 if v <= -0.008) >= 6
+    long_squ  = sum(1 for v in last10 if v >=  0.008) >= 6
+    if not (short_cas or long_squ):
+        return False
+    last2 = recent[-2:]
+    return all(abs(v) < 0.005 for v in last2)
+
+
 def update(pair_states: list, prices: dict) -> dict:
     """
     Called once per scan cycle.
@@ -225,6 +245,10 @@ def update(pair_states: list, prices: dict) -> dict:
     global _regime, _normal_count
 
     m         = _compute_metrics(pair_states, prices)
+    global _last_metrics, _fleet_exit_signal
+    _last_metrics      = dict(m)
+    _vel_history.append(m.get("sync_vel", 0.0))
+    _fleet_exit_signal = _compute_fleet_exit(m)
     candidate = _classify(m)
     prev      = _regime
     committed = _apply_hysteresis(candidate)
@@ -282,6 +306,21 @@ def get_pill_text() -> str:
         "TRENDING": "TRENDING -- respect direction",
     }
     return labels.get(_regime, _regime)
+
+
+
+def get_metrics() -> dict:
+    """Phase A: expose sentinel state. Phase B/C: convergence + exit signal."""
+    return {
+        "regime":                  _regime,
+        "breadth_dn":              _last_metrics.get("breadth_dn", 0.0),
+        "breadth_up":              _last_metrics.get("breadth_up", 0.0),
+        "avg_adx":                 _last_metrics.get("avg_adx",    0.0),
+        "sync_vel":                _last_metrics.get("sync_vel",   0.0),
+        "fleet_exit_signal":       _fleet_exit_signal,
+        "fleet_convergence_short": _last_metrics.get("breadth_up", 0.0) >= 0.55,
+        "fleet_convergence_long":  _last_metrics.get("breadth_dn", 0.0) >= 0.55,
+    }
 
 
 def check_executor(open_trades: dict):

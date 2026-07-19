@@ -532,8 +532,7 @@ async def run_full_scan(client, market_health: Optional[dict] = None, open_trade
 
             # -- Indicators ----------------------------------------------------
             _, _, j5m  = _compute_kdj(candles_1m[:-1])
-            _, _, j15m      = _compute_kdj(candles_15m[:-1])
-            _, _, j15m_prev = _compute_kdj(candles_15m[:-2]) if len(candles_15m) >= 2 else (50.0, 50.0, 50.0)
+            _, _, j15m = _compute_kdj(candles_15m[:-1])
             _, _, j1h  = _compute_kdj(candles_1h[:-1])
             rsi15m     = _compute_rsi(candles_15m)
             rsi1h      = _compute_rsi(candles_1h)
@@ -702,13 +701,6 @@ async def run_full_scan(client, market_health: Optional[dict] = None, open_trade
                     g_stoch = stoch_k > 75 and stoch_k < stoch_d
 
                     g_depth = ask_pct >= DEPTH_GATE_PCT
-                    # J15M FRESHNESS GATE — block stale overbought
-                    # (j15m already above threshold last 15m candle = sustained trend, not a spike)
-                    if j15m_prev >= J15M_SHORT_GATE:
-                        asyncio.create_task(_log_gate(
-                            "MEXC", symbol, "J15M_STALE", direction,
-                            f"j15m={j15m:.1f} stale: prev={j15m_prev:.1f} >= {J15M_SHORT_GATE}"))
-                        continue
                     if _regime_block_short:
                         log.info(f"[REGIME] {symbol} SHORT blocked - BTC J1H={_btc_j1h:.1f} corr={_pair_corr}")
                         continue
@@ -787,13 +779,6 @@ async def run_full_scan(client, market_health: Optional[dict] = None, open_trade
                     g_stoch = stoch_k < 25 and stoch_k > stoch_d
 
                     g_depth = bid_pct >= DEPTH_GATE_PCT
-                    # J15M FRESHNESS GATE — block stale oversold
-                    # (j15m already below threshold last 15m candle = sustained downtrend, not a bounce)
-                    if j15m_prev <= J15M_LONG_GATE:
-                        asyncio.create_task(_log_gate(
-                            "MEXC", symbol, "J15M_STALE", direction,
-                            f"j15m={j15m:.1f} stale: prev={j15m_prev:.1f} <= {J15M_LONG_GATE}"))
-                        continue
                     if _regime_block_long:
                         log.info(f"[REGIME] {symbol} LONG blocked - BTC J1H={_btc_j1h:.1f} corr={_pair_corr}")
                         continue
@@ -1047,8 +1032,7 @@ async def scan_pair_state(client) -> list[dict]:
                     continue
 
             _, _, j5m  = _compute_kdj(candles_1m[:-1])
-            _, _, j15m      = _compute_kdj(candles_15m[:-1])
-            _, _, j15m_prev = _compute_kdj(candles_15m[:-2]) if len(candles_15m) >= 2 else (50.0, 50.0, 50.0)
+            _, _, j15m = _compute_kdj(candles_15m[:-1])
             _, _, j1h  = _compute_kdj(candles_1h[:-1])
             rsi15m     = _compute_rsi(candles_15m)
             rsi1h      = _compute_rsi(candles_1h)

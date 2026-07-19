@@ -2863,21 +2863,16 @@ async function cfgFetch() {
     document.getElementById(
       'cfg-circuit').value =
       d.consecutive_loss_stop ?? 3;
-    document.getElementById(
-      'cfg-lev-high').value =
-      d.leverage_high ?? 10;
-    document.getElementById(
-      'cfg-lev-mid').value =
-      d.leverage_mid ?? 5;
-    document.getElementById(
-      'cfg-lev-low').value =
-      d.leverage_low ?? 5;
-    document.getElementById(
-      'cfg-margin-cap').value =
-      d.margin_hard_cap ?? 25000;
-    document.getElementById(
-      'cfg-trail-atr').value =
-      d.trail_atr_multiplier ?? 0.5;
+    var elLH = document.getElementById('cfg-lev-high');
+    if (elLH) elLH.value = d.leverage_high ?? 10;
+    var elLM = document.getElementById('cfg-lev-mid');
+    if (elLM) elLM.value = d.leverage_mid ?? 5;
+    var elLL = document.getElementById('cfg-lev-low');
+    if (elLL) elLL.value = d.leverage_low ?? 5;
+    var elMC = document.getElementById('cfg-margin-cap');
+    if (elMC) elMC.value = d.margin_hard_cap ?? 25000;
+    var elTA = document.getElementById('cfg-trail-atr');
+    if (elTA) elTA.value = d.trail_atr_multiplier ?? 0.5;
     cfgUpdatePaperLabel();
     cfgUpdateTgLabel();
     cfgFetchIdentity();
@@ -2958,21 +2953,11 @@ async function cfgSave() {
     consecutive_loss_stop: Number(
       document.getElementById(
       'cfg-circuit').value),
-    leverage_high: Number(
-      document.getElementById(
-      'cfg-lev-high').value),
-    leverage_mid: Number(
-      document.getElementById(
-      'cfg-lev-mid').value),
-    leverage_low: Number(
-      document.getElementById(
-      'cfg-lev-low').value),
-    margin_hard_cap: Number(
-      document.getElementById(
-      'cfg-margin-cap').value),
-    trail_atr_multiplier: Number(
-      document.getElementById(
-      'cfg-trail-atr').value),
+    leverage_high: Number((document.getElementById('cfg-lev-high')||{}).value||10),
+    leverage_mid: Number((document.getElementById('cfg-lev-mid')||{}).value||5),
+    leverage_low: Number((document.getElementById('cfg-lev-low')||{}).value||5),
+    margin_hard_cap: Number((document.getElementById('cfg-margin-cap')||{}).value||25000),
+    trail_atr_multiplier: Number((document.getElementById('cfg-trail-atr')||{}).value||0.5),
   };
   try {
     var r = await fetch('/api/settings',

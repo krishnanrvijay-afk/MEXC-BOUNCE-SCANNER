@@ -2011,10 +2011,10 @@ function _ovRulerHtml(d, dir) {
     function _ovJ1hHtml(d, dir) {
       const j = Math.min(100, Math.max(0, d.j1h || 0));
       const isL = dir === 'LONG';
-      const pass = isL ? (j >= 0 && j < 59) : (j > 60 && j <= 89);
+      const pass = isL ? (j >= 0 && j < 59) : (j > 60 && j < 85);
       const note = isL
         ? `needs &lt;59 for LONG, currently ${j.toFixed(1)}`
-        : `needs &gt;60 and &lt;=89 for SHORT, currently ${j.toFixed(1)}`;
+        : `needs &gt;60 and &lt;85 for SHORT, currently ${j.toFixed(1)}`;
       const dotCls = pass
         ? 'background:#00e676;box-shadow:0 0 6px #00e676;color:#000'
         : (j > 60 ? 'background:#ff4646;box-shadow:0 0 6px #ff4646;color:#000' : 'background:#555;color:#fff');

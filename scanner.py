@@ -680,18 +680,7 @@ async def run_full_scan(client, market_health: Optional[dict] = None, open_trade
                     if _regime_block_short:
                         log.info(f"[REGIME] {symbol} SHORT blocked - BTC J1H={_btc_j1h:.1f} corr={_pair_corr}")
                         continue
-                    # BTC macro trend SHORT gate
-                    # Block SHORTs when BTC J1H is higher now than 6 scans
-                    # ago — macro uptrend active
-                    # prevents firing SHORTs into a sustained BTC rally
-                    if (direction == "SHORT"
-                            and len(_btc_j1h_history) >= 10
-                            and _btc_j1h > _btc_j1h_history[-10]):
-                        asyncio.create_task(_log_gate(
-                            "MEXC", symbol, "BTC_MACRO_RISE", direction,
-                            f"btc_j1h={_btc_j1h:.1f} > "
-                            f"{_btc_j1h_history[-10]:.1f} 10 scans ago"))
-                        continue
+                    # BTC_MACRO_RISE removed — pair-level J15M/J1H gates sufficient
                     # SHORT session/J1H directional gates
                     # Gate 1: SHORT_EU_J1H_HIGH
                     # EU + J1H >= 78: 5 losses 1 win, -$1,062 net

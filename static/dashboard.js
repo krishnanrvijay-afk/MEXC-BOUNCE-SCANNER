@@ -1953,10 +1953,31 @@ function _ovRulerHtml(d, dir) {
       </div>`;
     }
 
+    function _ovSessHtml(d, dir) {
+      const isL  = dir === 'LONG';
+      const halt = isL ? (d.session_halted_long || false) : (d.session_halted_short || false);
+      const pass = !halt;
+      const note = pass ? 'SESSION OPEN — no halt active' : '2 SLs this session — resumes next session open';
+      const dotCls = pass ? 'background:#00e676;box-shadow:0 0 6px #00e676;color:#000' : 'background:#ff4646;color:#000';
+      return _ovGateRowHtml('SESSION', pass, note, _ovTrackHtml(pass ? 100 : 0, dotCls));
+    }
+
+    function _ovCoolHtml(d, dir) {
+      const isL   = dir === 'LONG';
+      const stdCd = isL ? (d.cooldown_long  || 0) : (d.cooldown_short  || 0);
+      const lgCd  = isL ? (d.large_sl_cooldown_long_remaining  || 0) : (d.large_sl_cooldown_short_remaining || 0);
+      const maxCd = Math.max(stdCd, lgCd);
+      const pass  = maxCd === 0;
+      const cdStr = maxCd >= 60 ? Math.floor(maxCd/60)+'m '+(maxCd%60)+'s' : maxCd+'s';
+      const note  = pass ? 'CLEAR — no cooldown active' : 'COOLING DOWN — '+cdStr+' remaining';
+      const dotCls = pass ? 'background:#00e676;box-shadow:0 0 6px #00e676;color:#000' : 'background:#ff4646;color:#000';
+      return _ovGateRowHtml('COOLDOWN', pass, note, _ovTrackHtml(pass ? 100 : 0, dotCls));
+    }
+
     function _ovVerdictHtml(d, dir) {
       const gates = _ovGates(d, dir);
       const score = gates.filter(Boolean).length;
-      const allPass = score === 4;
+      const allPass = score === 6;
       const bg  = allPass ? '#081a08' : '#1a0808';
       const col = allPass ? '#00e676' : '#ff5252';
       const bdr = allPass ? '#00e67233' : '#ff525233';
@@ -1970,7 +1991,7 @@ function _ovRulerHtml(d, dir) {
       } else if (allPass) {
         msg = '[OK] ALL GATES PASS - ' + (rg ? rg.label.replace(/[^\x00-\x7F]/g,'') + ' confirmed' : 'regime exempt');
       } else {
-        const fails = ['J15M','J1H','RSI','DEPTH'].filter((_,i) => !gates[i]);
+        const fails = ['J15M','J1H','RSI','DEPTH','SES','COL'].filter((_,i) => !gates[i]);
         msg = '[x] NOT READY - ' + fails.join(', ');
       }
       return `<div style="margin:4px 10px 0;padding:4px 8px;border-radius:3px;background:${bg};border:1px solid ${bdr};font-family:'JetBrains Mono',monospace;font-size:8px;font-weight:700;color:${col};letter-spacing:0.05em">${msg}</div>`;
@@ -2225,6 +2246,8 @@ function _ovRender(pn, d) {
           ${_ovJ1hHtml(d, dir)}
           ${_ovRsiHtml(d, dir)}
           ${_ovDepthHtml(d, dir)}
+          ${_ovSessHtml(d, dir)}
+          ${_ovCoolHtml(d, dir)}
           ${_ovGates(d, dir).filter(Boolean).length >= 3 ? _ovScanConfHtml(d, dir) : ''}
         </div>
       <div class="pov-adx-row">

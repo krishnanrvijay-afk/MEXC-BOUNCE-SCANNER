@@ -2024,18 +2024,20 @@ function _ovRulerHtml(d, dir) {
     function _ovRsiHtml(d, dir) {
       const isL  = dir !== 'SHORT';
       const rsi  = +(d.rsi15m || 50);
-      const pass = isL ? (rsi < 50) : (rsi > 35);
+      const rsiLM = (d.thresholds && d.thresholds.rsi_long_max)  || 50;
+      const rsiSM = (d.thresholds && d.thresholds.rsi_short_min) || 35;
+      const pass = isL ? (rsi < rsiLM) : (rsi > rsiSM);
       const needle = Math.min(99, Math.max(1, rsi));
-      const thrPct = isL ? 50 : 35;
+      const thrPct = isL ? rsiLM : rsiSM;
       const note = pass
-        ? 'RSI in valid zone — ' + (isL ? 'below 50 (not yet recovered)' : 'above 35 (not approaching oversold)')
-        : (isL ? 'RSI ' + rsi.toFixed(1) + ' — needs <50 for LONG' : 'RSI ' + rsi.toFixed(1) + ' — needs >35 for SHORT');
+        ? 'RSI in valid zone — ' + (isL ? 'below ' + rsiLM + ' (not yet recovered)' : 'above ' + rsiSM + ' (not approaching oversold)')
+        : (isL ? 'RSI ' + rsi.toFixed(1) + ' — needs <' + rsiLM + ' for LONG' : 'RSI ' + rsi.toFixed(1) + ' — needs >' + rsiSM + ' for SHORT');
       const track = '<div style="font-family:\'JetBrains Mono\',monospace;font-size:12px;font-weight:700;color:#fff;margin-bottom:4px">Currently RSI = <span style="color:' + (pass ? '#00e676' : '#ff5252') + '">' + rsi.toFixed(1) + '</span></div>'
-        + '<div style="position:relative;height:16px;border-radius:4px;width:100%;margin:4px 0;background:linear-gradient(to right,#003d1f 0%,#00e676 34.5%,#1a1a1a 35%,#1a1a1a 49.5%,#3a1a1a 50%,#3a1a1a 100%)">'
+        + '<div style="position:relative;height:16px;border-radius:4px;width:100%;margin:4px 0;background:linear-gradient(to right,#003d1f 0%,#00e676 ' + (rsiSM-0.5).toFixed(1) + '%,#1a1a1a ' + rsiSM + '%,#1a1a1a ' + (rsiLM-0.5).toFixed(1) + '%,#3a1a1a ' + rsiLM + '%,#3a1a1a 100%)">'
         + '<div style="position:absolute;top:50%;transform:translate(-50%,-50%);left:' + thrPct + '%;width:2px;height:20px;background:#ffffff;opacity:0.4;border-radius:1px"></div>'
         + '<div style="position:absolute;top:50%;transform:translate(-50%,-50%);left:' + needle.toFixed(1) + '%;width:14px;height:14px;border-radius:50%;background:' + (pass ? '#00e676' : '#ff4646') + ';display:flex;align-items:center;justify-content:center;z-index:2"><span style="font-size:7px;font-weight:700;color:#000;font-family:\'JetBrains Mono\',monospace;line-height:1">R</span></div>'
         + '</div>'
-        + '<div style="display:flex;justify-content:space-between;margin-top:3px;font-size:7px;font-weight:700;color:#666"><span style="color:#00e676">0</span><span style="color:#00e676">35</span><span style="color:#ff5252">50</span><span style="color:#ff5252">100</span></div>';
+        + '<div style="display:flex;justify-content:space-between;margin-top:3px;font-size:7px;font-weight:700;color:#666"><span style="color:#00e676">0</span><span style="color:#00e676">' + rsiSM + '</span><span style="color:#ff5252">' + rsiLM + '</span><span style="color:#ff5252">100</span></div>';
       return _ovGateRowHtml('RSI', pass, note, track);
     }
 
@@ -2044,11 +2046,12 @@ function _ovRulerHtml(d, dir) {
       const bid  = Math.min(100, Math.max(0, d.bid_pct || 0));
       const ask  = Math.min(100, Math.max(0, d.ask_pct || 100 - bid));
       const pct  = isL ? bid : ask;
-      const pass = pct >= 55;
+      const depG = (d.thresholds && d.thresholds.depth_gate) || 55;
+      const pass = pct >= depG;
       const lbl  = isL ? 'BID' : 'ASK';
       const note = pass
-        ? `${pct.toFixed(0)}% ${lbl} depth - needs &gt;=55%`
-        : `needs &gt;=55% ${lbl} depth, currently ${pct.toFixed(0)}%`;
+        ? `${pct.toFixed(0)}% ${lbl} depth - needs &gt;=${depG}%`
+        : `needs &gt;=${depG}% ${lbl} depth, currently ${pct.toFixed(0)}%`;
       const dotCls = pass
         ? 'background:#00e676;box-shadow:0 0 6px #00e676;color:#000'
         : 'background:#555;color:#fff';

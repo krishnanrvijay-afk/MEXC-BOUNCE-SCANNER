@@ -45,9 +45,7 @@ TP1_CLOSE_PCT        = 0.70        # Trailblazer: close 70% at TP1 (runner 30% s
 TP2_R                = 1.2         # p75 MFE = 1.1-1.2R. 25% of winners reach 1.2R vs 10% reaching 1.5R.
 TRAIL_ATR_MULTIPLIER = 0.5         # trail_stop = trail_best  (atr15m  TRAIL_ATR_MULTIPLIER)
 
-LEVERAGE_HIGH = 10
-LEVERAGE_MID  = 5
-LEVERAGE_LOW  = 5
+LEVERAGE = 5
 
 CONSECUTIVE_LOSS_STOP = 3
 DAILY_LOSS_LIMIT      = -800.0

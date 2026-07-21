@@ -72,6 +72,7 @@ _pair_cooldowns: dict           = {}   # keyed symbol -> expiry ts
 _bypass_cooldowns: dict[str, float] = {}  # keyed "SYMBOLLONG" -> expiry ts (bypass re-entry timer)
 BYPASS_COOLDOWN_SECONDS: int = 1800        # 30 min re-entry timer after any bypass LONG fires
 BYPASS_J15M_MAX: float = 20.0              # J15M must be < this for bypass LONGs (tighter gate during BTC LONG_BLOCKED)
+BYPASS_J15M_SHORT_MIN: float = 80.0        # J15M must be > this for bypass SHORTs (tighter gate during BTC SHORT_BLOCKED)
 _scan_count:  int              = 0
 _fleet_halt:  bool             = False  # set by fleet-scorecard halt API via Supabase
 _stale_prices: set[str]        = set()  # symbols with 5+ consecutive missing prices
@@ -571,7 +572,7 @@ async def run_full_scan(client, market_health: Optional[dict] = None, open_trade
                     _regime_block_long = True
             elif _btc_j1h < 20.0:
                 _btc_regime_context = "SHORT_BLOCKED"
-                if _pair_corr >= 0.70:  # only block HIGH-CORR pairs; low-corr bypass
+                if _pair_corr >= 0.70 and j1h <= J1H_SHORT_MIN:  # bypass: pair already recovered above floor
                     _regime_block_short = True
             elif 40.0 <= _btc_j1h <= 60.0:
                 _btc_regime_context = "NEUTRAL_BLOCK"
@@ -701,6 +702,35 @@ async def run_full_scan(client, market_health: Optional[dict] = None, open_trade
                     if _regime_block_short:
                         log.info(f"[REGIME] {symbol} SHORT blocked - BTC J1H={_btc_j1h:.1f} corr={_pair_corr}")
                         continue
+                    # BTC regime SHORT gate — correlation-gated (corr >= 0.70 only)
+                    # SHORT_BLOCKED bypass: if pair J1H > J1H_SHORT_MIN, pair already recovered
+                    if (direction == "SHORT" and
+                            _btc_regime_context == "SHORT_BLOCKED" and
+                            _pair_corr >= 0.70 and
+                            j1h <= J1H_SHORT_MIN):
+                        asyncio.create_task(_log_gate(
+                            "MEXC", symbol, "BTC_REGIME_CORR_BLOCK_S", direction,
+                            f"btc_j1h={_btc_j1h:.1f} SHORT_BLOCKED corr={_pair_corr:.2f}>=0.70 j1h={j1h:.1f}<={J1H_SHORT_MIN}"))
+                        continue
+                    # ── Bypass-specific gates (SHORT entering under BTC SHORT_BLOCKED) ──
+                    if (direction == "SHORT" and
+                            _btc_regime_context == "SHORT_BLOCKED" and
+                            _pair_corr >= 0.70 and
+                            j1h > J1H_SHORT_MIN):
+                        # Gate A: J15M must be deeply overbought during bypass
+                        if j15m <= BYPASS_J15M_SHORT_MIN:
+                            asyncio.create_task(_log_gate(
+                                "MEXC", symbol, "BYPASS_J15M_SHORT_FAIL", direction,
+                                f"bypass j15m={j15m:.1f} need>{BYPASS_J15M_SHORT_MIN:.0f} (BTC SHORT_BLOCKED)"))
+                            continue
+                        # Gate B: 30-min re-entry timer per pair after any bypass SHORT fires
+                        _bypass_cd_key = f"{symbol}SHORT"
+                        _bypass_cd_rem = int(_bypass_cooldowns.get(_bypass_cd_key, 0) - time.time())
+                        if _bypass_cd_rem > 0:
+                            asyncio.create_task(_log_gate(
+                                "MEXC", symbol, "BYPASS_REENTRY_CD_S", direction,
+                                f"bypass SHORT cooldown {_bypass_cd_rem}s remaining ({BYPASS_COOLDOWN_SECONDS//60}min timer)"))
+                            continue
                     # BTC_MACRO_RISE removed — pair-level J15M/J1H gates sufficient
                     # SHORT session/J1H directional gates
                     # Gate 1: SHORT_EU_J1H_HIGH
@@ -969,6 +999,13 @@ async def run_full_scan(client, market_health: Optional[dict] = None, open_trade
                         _pair_corr >= 0.70 and
                         j1h < J1H_LONG_MAX):
                     _bypass_cooldowns[f"{symbol}LONG"] = time.time() + BYPASS_COOLDOWN_SECONDS
+                    alert["bypass_entry"] = True
+                # Stamp bypass re-entry cooldown when a bypass SHORT signal fires
+                if (direction == "SHORT" and
+                        _btc_regime_context == "SHORT_BLOCKED" and
+                        _pair_corr >= 0.70 and
+                        j1h > J1H_SHORT_MIN):
+                    _bypass_cooldowns[f"{symbol}SHORT"] = time.time() + BYPASS_COOLDOWN_SECONDS
                     alert["bypass_entry"] = True
                 new_alerts.append(alert)
                 log.info(

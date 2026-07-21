@@ -1030,6 +1030,14 @@
             <div class="hl-cfg-gate-lbl">SHORT J1H MIN</div>
             <input class="hl-cfg-gate-inp" type="number" id="cfg-j1h-os" min="0" max="100">
           </div>
+          <div class="hl-cfg-gate-cell">
+            <div class="hl-cfg-gate-lbl">SHORT J5M MIN</div>
+            <input class="hl-cfg-gate-inp" type="number" id="cfg-j5m-os" min="0" max="100">
+          </div>
+          <div class="hl-cfg-gate-cell">
+            <div class="hl-cfg-gate-lbl">LONG J5M MAX</div>
+            <input class="hl-cfg-gate-inp" type="number" id="cfg-j5m-ob" min="0" max="100">
+          </div>
         </div>
         <div class="hl-cfg-manifest-row">
           <span class="hl-cfg-manifest-lbl">SHORT J1H MAX</span>
@@ -1043,11 +1051,23 @@
           <input class="hl-cfg-manifest-inp" type="number" id="cfg-j1h-ob-max" min="0" max="100" step="1">
           <span class="hl-cfg-manifest-unit"></span>
         </div>
-        <div class="hl-cfg-manifest-row" style="border-bottom:none">
+        <div class="hl-cfg-manifest-row">
           <span class="hl-cfg-manifest-lbl">LONG J1H MIN</span>
           <div class="hl-cfg-manifest-dots"></div>
           <input class="hl-cfg-manifest-inp" type="number" id="cfg-j1h-ob" min="0" max="100" step="1">
           <span class="hl-cfg-manifest-unit"></span>
+        </div>
+        <div class="hl-cfg-manifest-row">
+          <span class="hl-cfg-manifest-lbl">SHORT ENTRY DEPTH</span>
+          <div class="hl-cfg-manifest-dots"></div>
+          <input class="hl-cfg-manifest-inp" type="number" id="cfg-depth-short" min="0" max="100" step="1">
+          <span class="hl-cfg-manifest-unit">%</span>
+        </div>
+        <div class="hl-cfg-manifest-row" style="border-bottom:none">
+          <span class="hl-cfg-manifest-lbl">LONG ENTRY DEPTH</span>
+          <div class="hl-cfg-manifest-dots"></div>
+          <input class="hl-cfg-manifest-inp" type="number" id="cfg-depth-long" min="0" max="100" step="1">
+          <span class="hl-cfg-manifest-unit">%</span>
         </div>
       </div>
       <div class="hl-cfg-tear"><div class="hl-cfg-tear-circ"></div><div class="hl-cfg-tear-line"></div><div class="hl-cfg-tear-circ"></div></div>
